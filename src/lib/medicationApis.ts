@@ -1,5 +1,7 @@
 const OPENFDA_API_KEY = import.meta.env.VITE_OPENFDA_API_KEY as string | undefined;
 const USDA_API_KEY = import.meta.env.VITE_USDA_API_KEY as string | undefined;
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+const DDINTER_API_URL = import.meta.env.VITE_DDINTER_API_URL as string | undefined;
 
 const ALLOWED_RXNAV_TTYS = new Set(['IN', 'PIN', 'MIN', 'SCD', 'SBD', 'SCDC', 'SBDC']);
 
@@ -9,6 +11,11 @@ export interface DrugSuggestion {
 }
 
 export interface RxNavInteraction {
+  severity: 'high' | 'moderate' | 'low';
+  description: string;
+}
+
+export interface DdinterInteraction {
   severity: 'high' | 'moderate' | 'low';
   description: string;
 }
@@ -24,7 +31,82 @@ export interface UsdaFoodMatch {
   category?: string;
 }
 
+export interface GeminiMedicalAdvice {
+  severity: 'high' | 'moderate' | 'low' | 'safe' | 'none';
+  summary: string;
+  explanation: string;
+  recommendations: string[];
+  cautions: string[];
+  source: 'Gemini';
+}
+
+interface GeminiMedicalInput {
+  context: 'drug-interaction' | 'food-compatibility' | 'supplement-check' | 'symptom-check' | 'dose-advice';
+  drugA?: string;
+  drugB?: string;
+  medication?: string;
+  food?: string;
+  supplements?: string[];
+  symptoms?: string[];
+  evidence?: string[];
+}
+
 const clean = (value?: string) => (value || '').replace(/\s+/g, ' ').trim();
+
+const splitCsv = (value?: string) =>
+  (value || '')
+    .split(',')
+    .map(item => clean(item))
+    .filter(Boolean);
+
+const normalizeGeminiSeverity = (value?: string): GeminiMedicalAdvice['severity'] => {
+  const normalized = (value || '').toLowerCase().trim();
+  if (normalized === 'high') return 'high';
+  if (normalized === 'moderate') return 'moderate';
+  if (normalized === 'low') return 'low';
+  if (normalized === 'safe') return 'safe';
+  return 'none';
+};
+
+const extractGeminiText = (payload: any) => {
+  const parts = payload?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+  return parts
+    .map(part => (typeof part?.text === 'string' ? part.text : ''))
+    .join('\n')
+    .trim();
+};
+
+const parseGeminiJson = (raw: string) => {
+  const cleaned = raw.replace(/```json|```/gi, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(cleaned.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+};
+
+const normalizeSeverity = (value?: string): 'high' | 'moderate' | 'low' => {
+  const normalized = (value || '').toLowerCase();
+  if (normalized.includes('high') || normalized.includes('major') || normalized.includes('severe')) return 'high';
+  if (normalized.includes('moderate') || normalized.includes('medium')) return 'moderate';
+  return 'low';
+};
+
+const buildDdinterUrl = (drugA: string, drugB: string) => {
+  if (!DDINTER_API_URL) return null;
+  if (DDINTER_API_URL.includes('{drugA}') || DDINTER_API_URL.includes('{drugB}')) {
+    return DDINTER_API_URL
+      .replace('{drugA}', encodeURIComponent(drugA))
+      .replace('{drugB}', encodeURIComponent(drugB));
+  }
+
+  const separator = DDINTER_API_URL.includes('?') ? '&' : '?';
+  return `${DDINTER_API_URL}${separator}drug1=${encodeURIComponent(drugA)}&drug2=${encodeURIComponent(drugB)}`;
+};
 
 const normalizeDrugName = (name: string) => clean(name).replace(/^\{+/, '').replace(/\}+$/, '').trim();
 
@@ -47,8 +129,14 @@ const getSuggestionScore = (name: string, term: string) => {
 export const searchRxNavSuggestions = async (term: string): Promise<DrugSuggestion[]> => {
   if (!term.trim()) return [];
 
-  const response = await fetch(`https://rxnav.nlm.nih.gov/REST/drugs.json?name=${encodeURIComponent(term)}`);
-  const data = await response.json();
+  let data: any = null;
+  try {
+    const response = await fetch(`https://rxnav.nlm.nih.gov/REST/drugs.json?name=${encodeURIComponent(term)}`);
+    if (!response.ok) return [];
+    data = await response.json();
+  } catch {
+    return [];
+  }
   const groups = data?.drugGroup?.conceptGroup || [];
 
   const suggestions: DrugSuggestion[] = [];
@@ -78,14 +166,25 @@ export const searchRxNavSuggestions = async (term: string): Promise<DrugSuggesti
 };
 
 export const getRxCui = async (drugName: string): Promise<string | null> => {
-  const response = await fetch(`https://rxnav.nlm.nih.gov/REST/rxcui.json?name=${encodeURIComponent(drugName)}`);
-  const data = await response.json();
-  return data?.idGroup?.rxnormId?.[0] || null;
+  try {
+    const response = await fetch(`https://rxnav.nlm.nih.gov/REST/rxcui.json?name=${encodeURIComponent(drugName)}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data?.idGroup?.rxnormId?.[0] || null;
+  } catch {
+    return null;
+  }
 };
 
 export const getRxNavInteractions = async (rxcuiA: string, rxcuiB: string): Promise<RxNavInteraction[]> => {
-  const response = await fetch(`https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${rxcuiA}+${rxcuiB}`);
-  const data = await response.json();
+  let data: any = null;
+  try {
+    const response = await fetch(`https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${rxcuiA}+${rxcuiB}`);
+    if (!response.ok) return [];
+    data = await response.json();
+  } catch {
+    return [];
+  }
 
   const pairs = data?.fullInteractionTypeGroup?.[0]?.fullInteractionType || [];
   const output: RxNavInteraction[] = [];
@@ -108,6 +207,35 @@ export const getRxNavInteractions = async (rxcuiA: string, rxcuiB: string): Prom
   });
 
   return output.slice(0, 10);
+};
+
+export const getDdinterInteractions = async (drugA: string, drugB: string): Promise<DdinterInteraction[]> => {
+  const url = buildDdinterUrl(drugA, drugB);
+  if (!url) return [];
+
+  let payload: any = null;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return [];
+    payload = await response.json();
+  } catch {
+    return [];
+  }
+
+  const rawList =
+    (Array.isArray(payload) && payload) ||
+    (Array.isArray(payload?.interactions) && payload.interactions) ||
+    (Array.isArray(payload?.results) && payload.results) ||
+    (Array.isArray(payload?.data) && payload.data) ||
+    [];
+
+  return rawList
+    .map((item: any) => ({
+      severity: normalizeSeverity(item?.severity || item?.risk || item?.level || item?.importance),
+      description: clean(item?.description || item?.interaction || item?.comment || item?.evidence),
+    }))
+    .filter((item: DdinterInteraction) => !!item.description)
+    .slice(0, 8);
 };
 
 export const getOpenFdaSafety = async (drugName: string): Promise<OpenFdaSafety | null> => {
@@ -182,3 +310,58 @@ export const inferFoodRiskFromOpenFda = (safety: OpenFdaSafety | null, foodQuery
     evidence: hits.slice(0, 3),
   };
 };
+
+export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise<GeminiMedicalAdvice | null> => {
+  if (!GEMINI_API_KEY) return null;
+
+  const prompt = [
+    'You are a clinical safety assistant for a medication reminder app.',
+    'Return only JSON with this exact shape:',
+    '{"severity":"high|moderate|low|safe|none","summary":"...","explanation":"...","recommendations":["..."],"cautions":["..."]}',
+    `Context: ${input.context}`,
+    `Drug A: ${input.drugA || 'N/A'}`,
+    `Drug B: ${input.drugB || 'N/A'}`,
+    `Medication: ${input.medication || 'N/A'}`,
+    `Food: ${input.food || 'N/A'}`,
+    `Supplements: ${(input.supplements || []).join(', ') || 'N/A'}`,
+    `Symptoms: ${(input.symptoms || []).join(', ') || 'N/A'}`,
+    `Evidence: ${(input.evidence || []).join(' | ') || 'N/A'}`,
+    'Keep explanation concise and practical for patients.',
+  ].join('\n');
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 400,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const rawText = extractGeminiText(payload);
+    const parsed = parseGeminiJson(rawText);
+    if (!parsed) return null;
+
+    return {
+      severity: normalizeGeminiSeverity(parsed.severity),
+      summary: clean(parsed.summary) || 'No summary was returned by Gemini.',
+      explanation: clean(parsed.explanation) || 'No additional explanation available.',
+      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean) : [],
+      cautions: Array.isArray(parsed.cautions) ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean) : [],
+      source: 'Gemini',
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const parseInputList = (csvValue: string) => splitCsv(csvValue);

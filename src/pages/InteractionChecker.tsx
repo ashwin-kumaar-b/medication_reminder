@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { GitCompareArrows, Loader2, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useMedicines } from '@/contexts/MedicineContext';
-import { getOpenFdaSafety, getRxCui, getRxNavInteractions } from '@/lib/medicationApis';
+import { getDdinterInteractions, getGeminiMedicalAdvice, getOpenFdaSafety, getRxCui, getRxNavInteractions, parseInputList } from '@/lib/medicationApis';
 
 interface InteractionResult {
   severity: 'high' | 'moderate' | 'low' | 'none';
   description: string;
   drugs: string[];
-  source?: 'RxNav' | 'OpenFDA';
+  source?: 'RxNav' | 'OpenFDA' | 'Gemini' | 'DDInter';
 }
 
 const severityConfig = {
@@ -22,6 +22,8 @@ const InteractionChecker = () => {
   const { medicines } = useMedicines();
   const [drug1, setDrug1] = useState('');
   const [drug2, setDrug2] = useState('');
+  const [supplements, setSupplements] = useState('');
+  const [symptoms, setSymptoms] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<InteractionResult[]>([]);
   const [checked, setChecked] = useState(false);
@@ -50,9 +52,30 @@ const InteractionChecker = () => {
   };
 
   const checkPair = async (leftDrug: string, rightDrug: string): Promise<InteractionResult[]> => {
+    const supplementsList = parseInputList(supplements);
+    const symptomList = parseInputList(symptoms);
     const [rxcui1, rxcui2] = await Promise.all([getRxCui(leftDrug), getRxCui(rightDrug)]);
 
     if (!rxcui1 || !rxcui2) {
+      const geminiFallback = await getGeminiMedicalAdvice({
+        context: 'drug-interaction',
+        drugA: leftDrug,
+        drugB: rightDrug,
+        supplements: supplementsList,
+        symptoms: symptomList,
+      });
+
+      if (geminiFallback) {
+        return [
+          {
+            severity: geminiFallback.severity === 'safe' || geminiFallback.severity === 'none' ? 'none' : geminiFallback.severity,
+            description: `${geminiFallback.summary} ${geminiFallback.explanation}`.trim(),
+            drugs: [leftDrug, rightDrug],
+            source: 'Gemini',
+          },
+        ];
+      }
+
       return [
         {
           severity: 'moderate',
@@ -67,6 +90,11 @@ const InteractionChecker = () => {
     const rxNavItems = await getRxNavInteractions(rxcui1, rxcui2);
     rxNavItems.forEach(item => {
       interactions.push({ ...item, drugs: [leftDrug, rightDrug], source: 'RxNav' });
+    });
+
+    const ddinterItems = await getDdinterInteractions(leftDrug, rightDrug);
+    ddinterItems.forEach(item => {
+      interactions.push({ ...item, drugs: [leftDrug, rightDrug], source: 'DDInter' });
     });
 
     const [openFdaA, openFdaB] = await Promise.all([getOpenFdaSafety(leftDrug), getOpenFdaSafety(rightDrug)]);
@@ -87,6 +115,24 @@ const InteractionChecker = () => {
         source: 'OpenFDA',
       });
     });
+
+    const geminiAdvice = await getGeminiMedicalAdvice({
+      context: 'drug-interaction',
+      drugA: leftDrug,
+      drugB: rightDrug,
+      supplements: supplementsList,
+      symptoms: symptomList,
+      evidence: [...rxNavItems.map(item => item.description), ...ddinterItems.map(item => item.description), ...openFdaWarnings].slice(0, 8),
+    });
+
+    if (geminiAdvice) {
+      interactions.unshift({
+        severity: geminiAdvice.severity === 'safe' || geminiAdvice.severity === 'none' ? 'none' : geminiAdvice.severity,
+        description: `${geminiAdvice.summary} ${geminiAdvice.explanation}`.trim(),
+        drugs: [leftDrug, rightDrug],
+        source: 'Gemini',
+      });
+    }
 
     if (interactions.length === 0) {
       interactions.push({
@@ -197,6 +243,26 @@ const InteractionChecker = () => {
               <label className="mb-1.5 block text-sm font-medium text-foreground">Drug 2</label>
               <input value={drug2} onChange={e => setDrug2(e.target.value)} required placeholder="e.g., Aspirin"
                 className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20" />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Supplements (optional)</label>
+              <input
+                value={supplements}
+                onChange={e => setSupplements(e.target.value)}
+                placeholder="e.g., Fish oil, St. John's wort"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Symptoms (optional)</label>
+              <input
+                value={symptoms}
+                onChange={e => setSymptoms(e.target.value)}
+                placeholder="e.g., dizziness, nausea"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+              />
             </div>
           </div>
           <button type="submit" disabled={loading} className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">

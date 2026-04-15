@@ -4,6 +4,11 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 export type UserRole = 'patient' | 'caretaker';
 export type UiMode = 'younger' | 'older';
 
+export interface AllergyEntry {
+  category: string;
+  trigger: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -12,6 +17,13 @@ export interface User {
   role: UserRole;
   age?: number;
   illness?: string;
+  dateOfBirth?: string;
+  heightCm?: number;
+  weightKg?: number;
+  chronicDiseases?: string[];
+  infectionHistory?: string[];
+  allergies?: AllergyEntry[];
+  emergencyContactEmail?: string;
   uiMode: UiMode;
   linkedPatientId?: string;
 }
@@ -23,6 +35,13 @@ interface RegisterInput {
   role: UserRole;
   age?: number;
   illness?: string;
+  dateOfBirth?: string;
+  heightCm?: number;
+  weightKg?: number;
+  chronicDiseases?: string[];
+  infectionHistory?: string[];
+  allergies?: AllergyEntry[];
+  emergencyContactEmail?: string;
   uiMode?: UiMode;
   linkedPatientId?: string;
 }
@@ -83,6 +102,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       role: 'patient',
       age: 58,
       illness: 'Hypertension',
+      dateOfBirth: '1968-01-20',
+      heightCm: 168,
+      weightKg: 74,
+      chronicDiseases: ['Hypertension'],
+      infectionHistory: ['None'],
+      allergies: [{ category: 'Drug', trigger: 'Penicillin' }],
+      emergencyContactEmail: 'caretaker@mediguard.demo',
       uiMode: 'older',
     };
     const seedCaretaker: User = {
@@ -93,6 +119,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       role: 'caretaker',
       age: 31,
       illness: '',
+      dateOfBirth: '1995-03-12',
+      heightCm: 173,
+      weightKg: 69,
+      chronicDiseases: ['None'],
+      infectionHistory: ['None'],
+      allergies: [],
       uiMode: 'younger',
       linkedPatientId: seedPatient.id,
     };
@@ -105,41 +137,126 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [caretakerLinks, setCaretakerLinks] = useState<Array<{ caretakerId: string; patientId: string }>>([]);
 
-  const inferUiMode = (age?: number): UiMode => {
-    if (typeof age === 'number' && age >= 55) return 'older';
+  const inferAgeFromDob = (dateOfBirth?: string): number | undefined => {
+    if (!dateOfBirth) return undefined;
+    const date = new Date(dateOfBirth);
+    if (Number.isNaN(date.getTime())) return undefined;
+
+    const now = new Date();
+    let age = now.getFullYear() - date.getFullYear();
+    const monthGap = now.getMonth() - date.getMonth();
+    if (monthGap < 0 || (monthGap === 0 && now.getDate() < date.getDate())) {
+      age -= 1;
+    }
+    return age >= 0 ? age : undefined;
+  };
+
+  const inferUiMode = (age?: number, dateOfBirth?: string): UiMode => {
+    const resolvedAge = typeof age === 'number' ? age : inferAgeFromDob(dateOfBirth);
+    if (typeof resolvedAge === 'number' && resolvedAge >= 55) return 'older';
     return 'younger';
   };
 
-  const mapUserRow = (row: any): User => ({
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    password: row.password || undefined,
-    role: row.role,
-    age: typeof row.age === 'number' ? row.age : undefined,
-    illness: row.illness || undefined,
-    uiMode: row.ui_mode || inferUiMode(row.age),
-    linkedPatientId: row.linked_patient_id || undefined,
+  const normalizeStringArray = (value: unknown): string[] | undefined => {
+    if (!Array.isArray(value)) return undefined;
+    const cleaned = value
+      .map(item => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean);
+    return cleaned.length > 0 ? cleaned : undefined;
+  };
+
+  const normalizeAllergies = (value: unknown): AllergyEntry[] | undefined => {
+    if (!Array.isArray(value)) return undefined;
+    const cleaned = value
+      .map(item => {
+        if (!item || typeof item !== 'object') return null;
+        const category = typeof (item as any).category === 'string' ? (item as any).category.trim() : '';
+        const trigger = typeof (item as any).trigger === 'string' ? (item as any).trigger.trim() : '';
+        if (!category || !trigger) return null;
+        return { category, trigger };
+      })
+      .filter((item): item is AllergyEntry => !!item);
+    return cleaned.length > 0 ? cleaned : undefined;
+  };
+
+  const mapUserRow = (row: any): User => {
+    const profile = (row.profile_json || {}) as Record<string, unknown>;
+    const dateOfBirth =
+      (typeof row.date_of_birth === 'string' ? row.date_of_birth : undefined) ||
+      (typeof profile.dateOfBirth === 'string' ? profile.dateOfBirth : undefined);
+    const ageFromDob = inferAgeFromDob(dateOfBirth);
+
+    return {
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      password: row.password || undefined,
+      role: row.role,
+      age: typeof row.age === 'number' ? row.age : ageFromDob,
+      illness:
+        (typeof row.illness === 'string' ? row.illness : undefined) ||
+        (typeof profile.illness === 'string' ? profile.illness : undefined),
+      dateOfBirth,
+      heightCm:
+        typeof row.height_cm === 'number'
+          ? row.height_cm
+          : typeof profile.heightCm === 'number'
+            ? profile.heightCm
+            : undefined,
+      weightKg:
+        typeof row.weight_kg === 'number'
+          ? row.weight_kg
+          : typeof profile.weightKg === 'number'
+            ? profile.weightKg
+            : undefined,
+      chronicDiseases: normalizeStringArray(row.chronic_diseases ?? profile.chronicDiseases),
+      infectionHistory: normalizeStringArray(row.infection_history ?? profile.infectionHistory),
+      allergies: normalizeAllergies(row.allergies ?? profile.allergies),
+      emergencyContactEmail:
+        (typeof row.emergency_contact_email === 'string' ? row.emergency_contact_email : undefined) ||
+        (typeof profile.emergencyContactEmail === 'string' ? profile.emergencyContactEmail : undefined),
+      uiMode: row.ui_mode || inferUiMode(row.age, dateOfBirth),
+      linkedPatientId: row.linked_patient_id || undefined,
+    };
+  };
+
+  const buildUserRowPayload = (entry: User, passwordFallback?: string) => ({
+    id: entry.id,
+    name: entry.name,
+    email: entry.email,
+    // Backward-compatible with current schema where password is required.
+    password: passwordFallback ?? entry.password ?? '__supabase_auth__',
+    role: entry.role,
+    age: entry.age ?? null,
+    illness: entry.illness ?? null,
+    date_of_birth: entry.dateOfBirth ?? null,
+    height_cm: entry.heightCm ?? null,
+    weight_kg: entry.weightKg ?? null,
+    chronic_diseases: entry.chronicDiseases ?? null,
+    infection_history: entry.infectionHistory ?? null,
+    allergies: entry.allergies ?? null,
+    emergency_contact_email: entry.emergencyContactEmail ?? null,
+    ui_mode: entry.uiMode,
+    linked_patient_id: entry.linkedPatientId ?? null,
+    profile_json: {
+      dateOfBirth: entry.dateOfBirth ?? null,
+      heightCm: entry.heightCm ?? null,
+      weightKg: entry.weightKg ?? null,
+      chronicDiseases: entry.chronicDiseases ?? [],
+      infectionHistory: entry.infectionHistory ?? [],
+      allergies: entry.allergies ?? [],
+      emergencyContactEmail: entry.emergencyContactEmail ?? null,
+    },
   });
 
   const upsertUserRow = async (entry: User, passwordFallback?: string) => {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!isSupabaseConfigured || !supabase) return undefined;
 
-    await supabase.from('users').upsert(
-      {
-        id: entry.id,
-        name: entry.name,
-        email: entry.email,
-        // Backward-compatible with current schema where password is required.
-        password: passwordFallback ?? entry.password ?? '__supabase_auth__',
-        role: entry.role,
-        age: entry.age ?? null,
-        illness: entry.illness ?? null,
-        ui_mode: entry.uiMode,
-        linked_patient_id: entry.linkedPatientId ?? null,
-      },
-      { onConflict: 'id' },
-    );
+    const { error } = await supabase
+      .from('users')
+      .upsert(buildUserRowPayload(entry, passwordFallback), { onConflict: 'id' });
+
+    return error?.message;
   };
 
   const loadUsersFromSupabase = async () => {
@@ -196,18 +313,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     if (!isSupabaseConfigured || !supabase) return;
 
-    const payload = nextUsers.map(entry => ({
-      id: entry.id,
-      name: entry.name,
-      email: entry.email,
-      password: entry.password ?? '__supabase_auth__',
-      role: entry.role,
-      age: entry.age ?? null,
-      illness: entry.illness ?? null,
-      ui_mode: entry.uiMode,
-      linked_patient_id: entry.linkedPatientId ?? null,
-    }));
-    await supabase.from('users').upsert(payload, { onConflict: 'id' });
+    const payload = nextUsers.map(entry => buildUserRowPayload(entry, '__supabase_auth__'));
+    const { error } = await supabase.from('users').upsert(payload, { onConflict: 'id' });
+    if (error) {
+      throw new Error(`Unable to persist users in Supabase: ${error.message}`);
+    }
   };
 
   const persistUserSession = (userData: User) => {
@@ -231,7 +341,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!linkedPatient) return { ok: false, error: 'Invalid Patient ID. Please verify and try again.' };
     }
 
-    const profileMode = input.uiMode || inferUiMode(input.age);
+    const profileMode = input.uiMode || inferUiMode(input.age, input.dateOfBirth);
+    const normalizedChronicDiseases = normalizeStringArray(input.chronicDiseases) || ['None'];
+    const normalizedInfectionHistory = normalizeStringArray(input.infectionHistory) || ['None'];
+    const normalizedAllergies = normalizeAllergies(input.allergies) || [];
+    const normalizedEmergencyContactEmail = input.emergencyContactEmail?.trim() || undefined;
+
+    const resolvedAge =
+      typeof input.age === 'number' ? input.age : inferAgeFromDob(input.dateOfBirth);
+    const resolvedIllness =
+      input.illness?.trim() || normalizedChronicDiseases.find(item => item !== 'None') || undefined;
+
     if (isSupabaseConfigured && supabase) {
       const signupRes = await supabase.auth.signUp({
         email: normalizedEmail,
@@ -248,8 +368,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         name: input.name.trim(),
         email: normalizedEmail,
         role: input.role,
-        age: input.age,
-        illness: input.illness?.trim(),
+        age: resolvedAge,
+        illness: resolvedIllness,
+        dateOfBirth: input.dateOfBirth,
+        heightCm: input.heightCm,
+        weightKg: input.weightKg,
+        chronicDiseases: normalizedChronicDiseases,
+        infectionHistory: normalizedInfectionHistory,
+        allergies: normalizedAllergies,
+        emergencyContactEmail: input.role === 'patient' ? normalizedEmergencyContactEmail : undefined,
         uiMode: profileMode,
         linkedPatientId: input.role === 'caretaker' ? input.linkedPatientId?.trim() : undefined,
       };
@@ -258,7 +385,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUsers(nextUsers);
       localStorage.setItem('mediguard_users', JSON.stringify(nextUsers));
 
-      await upsertUserRow(newUser, '__supabase_auth__');
+      const profileSaveError = await upsertUserRow(newUser, '__supabase_auth__');
+      if (profileSaveError) {
+        return {
+          ok: false,
+          error:
+            `Signup succeeded but profile save failed: ${profileSaveError}. ` +
+            'Please run supabase/schema.sql in your Supabase SQL editor and retry.',
+        };
+      }
 
       if (newUser.role === 'caretaker' && newUser.linkedPatientId) {
         const nextLinks = [...caretakerLinks, { caretakerId: newUser.id, patientId: newUser.linkedPatientId }];
@@ -290,8 +425,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       email: normalizedEmail,
       password: input.password,
       role: input.role,
-      age: input.age,
-      illness: input.illness?.trim(),
+      age: resolvedAge,
+      illness: resolvedIllness,
+      dateOfBirth: input.dateOfBirth,
+      heightCm: input.heightCm,
+      weightKg: input.weightKg,
+      chronicDiseases: normalizedChronicDiseases,
+      infectionHistory: normalizedInfectionHistory,
+      allergies: normalizedAllergies,
+      emergencyContactEmail: input.role === 'patient' ? normalizedEmergencyContactEmail : undefined,
       uiMode: profileMode,
       linkedPatientId: input.role === 'caretaker' ? input.linkedPatientId?.trim() : undefined,
     };
@@ -334,6 +476,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       age: input.age,
       illness: input.illness?.trim(),
       uiMode: input.uiMode || inferUiMode(input.age),
+      chronicDiseases: input.illness?.trim() ? [input.illness.trim()] : ['None'],
+      infectionHistory: ['None'],
+      allergies: [],
     };
 
     const nextUsers = [...users, newPatient];
@@ -380,11 +525,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             role: ((authUser.user_metadata?.role as UserRole | undefined) || 'patient'),
             age: typeof authUser.user_metadata?.age === 'number' ? authUser.user_metadata.age : undefined,
             illness: authUser.user_metadata?.illness as string | undefined,
+            dateOfBirth: authUser.user_metadata?.date_of_birth as string | undefined,
+            heightCm: authUser.user_metadata?.height_cm as number | undefined,
+            weightKg: authUser.user_metadata?.weight_kg as number | undefined,
+            chronicDiseases: normalizeStringArray(authUser.user_metadata?.chronic_diseases),
+            infectionHistory: normalizeStringArray(authUser.user_metadata?.infection_history),
+            allergies: normalizeAllergies(authUser.user_metadata?.allergies),
+            emergencyContactEmail: authUser.user_metadata?.emergency_contact_email as string | undefined,
             uiMode: ((authUser.user_metadata?.ui_mode as UiMode | undefined) || 'younger'),
           };
 
       if (!profile) {
-        await upsertUserRow(userProfile, '__supabase_auth__');
+        const profileSaveError = await upsertUserRow(userProfile, '__supabase_auth__');
+        if (profileSaveError) {
+          return {
+            ok: false,
+            error:
+              `Logged in but profile sync failed: ${profileSaveError}. ` +
+              'Please run supabase/schema.sql in your Supabase SQL editor and retry.',
+          };
+        }
       }
 
       if (input.role && input.role !== userProfile.role) {
