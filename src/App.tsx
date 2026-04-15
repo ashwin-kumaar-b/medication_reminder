@@ -34,12 +34,12 @@ const App = () => (
                   <Route path="/" element={<Landing />} />
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-                  <Route path="/add-medicine" element={<ProtectedRoute><AddMedicine /></ProtectedRoute>} />
+                  <Route path="/add-medicine" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><AddMedicine /></ProtectedRoute>} />
                   <Route path="/medicines" element={<ProtectedRoute><Medicines /></ProtectedRoute>} />
                   <Route path="/interaction-checker" element={<ProtectedRoute><InteractionChecker /></ProtectedRoute>} />
                   <Route path="/food-check" element={<ProtectedRoute><FoodCheck /></ProtectedRoute>} />
-                  <Route path="/can-i-take" element={<ProtectedRoute><CanITake /></ProtectedRoute>} />
-                  <Route path="/missed-doses" element={<ProtectedRoute><MissedDoses /></ProtectedRoute>} />
+                  <Route path="/can-i-take" element={<ProtectedRoute allowRoles={['patient']}><CanITake /></ProtectedRoute>} />
+                  <Route path="/missed-doses" element={<ProtectedRoute allowRoles={['patient']}><MissedDoses /></ProtectedRoute>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </main>

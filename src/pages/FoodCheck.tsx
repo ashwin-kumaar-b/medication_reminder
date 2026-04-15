@@ -1,37 +1,41 @@
 import { useState } from 'react';
 import { Apple, Loader2, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { useMedicines } from '@/contexts/MedicineContext';
-
-// Rule-based drug-food interactions
-const drugFoodRules: { drug: RegExp; food: RegExp; severity: 'high' | 'moderate'; desc: string; alt: string }[] = [
-  { drug: /warfarin/i, food: /spinach|kale|broccoli|lettuce|vitamin k/i, severity: 'high', desc: 'Warfarin interacts with Vitamin K-rich foods, reducing its blood-thinning effect.', alt: 'Choose low Vitamin K foods like carrots, corn, or potatoes.' },
-  { drug: /statin|atorvastatin|simvastatin|lovastatin/i, food: /grapefruit/i, severity: 'high', desc: 'Grapefruit inhibits CYP3A4, increasing statin levels and risk of side effects.', alt: 'Try oranges, apples, or berries instead.' },
-  { drug: /maoi|phenelzine|tranylcypromine/i, food: /cheese|wine|beer|soy sauce|tyramine/i, severity: 'high', desc: 'MAOIs with tyramine-rich foods can cause dangerous blood pressure spikes.', alt: 'Choose fresh foods, avoid fermented or aged products.' },
-  { drug: /antibiotic|amoxicillin|ciprofloxacin|tetracycline/i, food: /milk|dairy|yogurt|cheese/i, severity: 'moderate', desc: 'Dairy can reduce absorption of certain antibiotics.', alt: 'Take the antibiotic 2 hours before or after dairy.' },
-  { drug: /metformin/i, food: /alcohol|beer|wine/i, severity: 'high', desc: 'Alcohol with Metformin increases risk of lactic acidosis.', alt: 'Avoid alcohol or limit to minimal amounts.' },
-  { drug: /ace inhibitor|lisinopril|enalapril/i, food: /banana|potato|tomato|potassium/i, severity: 'moderate', desc: 'ACE inhibitors raise potassium levels; high-potassium foods may cause hyperkalemia.', alt: 'Moderate intake of high-potassium foods.' },
-];
+import { getOpenFdaSafety, inferFoodRiskFromOpenFda, searchUsdaFood } from '@/lib/medicationApis';
 
 const FoodCheck = () => {
   const { medicines } = useMedicines();
   const [selectedMed, setSelectedMed] = useState('');
   const [food, setFood] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ severity: 'high' | 'moderate' | 'safe'; desc: string; alt: string } | null>(null);
+  const [result, setResult] = useState<{ severity: 'high' | 'moderate' | 'safe'; desc: string; alt: string; source: string } | null>(null);
 
   const handleCheck = async (e: React.FormEvent) => {
     e.preventDefault();
     const medName = selectedMed || '';
     if (!medName || !food) return;
     setLoading(true);
-    await new Promise(r => setTimeout(r, 800));
 
-    const match = drugFoodRules.find(rule => rule.drug.test(medName) && rule.food.test(food));
-    if (match) {
-      setResult({ severity: match.severity, desc: match.desc, alt: match.alt });
-    } else {
-      setResult({ severity: 'safe', desc: `No known interactions between ${medName} and ${food}.`, alt: 'You should be fine to consume this food with your medication.' });
-    }
+    const [foodMatch, openFda] = await Promise.all([
+      searchUsdaFood(food),
+      getOpenFdaSafety(medName),
+    ]);
+
+    const inferred = inferFoodRiskFromOpenFda(openFda, food);
+    const foodLabel = foodMatch ? `${foodMatch.name}${foodMatch.category ? ` (${foodMatch.category})` : ''}` : food;
+
+    setResult({
+      severity: inferred.severity,
+      desc: `${inferred.summary} USDA match: ${foodLabel}.`,
+      alt:
+        inferred.severity === 'high'
+          ? 'Avoid this combination until discussed with your healthcare provider.'
+          : inferred.severity === 'moderate'
+            ? 'Use caution and verify timing with your provider or pharmacist.'
+            : 'No direct match found, but continue following prescribed guidance.',
+      source: `USDA + OpenFDA${foodMatch ? '' : ' (food match unavailable)'}`,
+    });
+
     setLoading(false);
   };
 
@@ -81,9 +85,12 @@ const FoodCheck = () => {
             </div>
             <p className="mb-2 text-sm leading-relaxed opacity-90">{result.desc}</p>
             <p className="text-sm font-medium opacity-80">💡 {result.alt}</p>
+            <p className="mt-2 text-xs font-medium opacity-80">Source: {result.source}</p>
           </div>
         );
       })()}
+
+      <p className="mt-6 text-xs text-muted-foreground">Consult healthcare provider if unsure. This system supports adherence tracking and does not replace medical advice.</p>
     </div>
   );
 };

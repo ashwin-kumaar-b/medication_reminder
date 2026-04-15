@@ -88,6 +88,31 @@
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', sans-serif;
   }
+
+  :root[data-ui-mode='younger'] {
+    --gradient-primary: linear-gradient(135deg, hsl(194 92% 50%), hsl(156 90% 42%));
+    --gradient-hero: radial-gradient(circle at 15% 10%, hsl(194 100% 93%), hsl(156 88% 92%), hsl(205 100% 97%));
+    --radius: 1rem;
+  }
+
+  :root[data-ui-mode='older'] {
+    --background: 210 28% 98%;
+    --foreground: 210 22% 16%;
+    --card: 0 0% 100%;
+    --card-foreground: 210 22% 16%;
+    --accent: 204 45% 94%;
+    --accent-foreground: 210 22% 24%;
+    --border: 210 22% 85%;
+    --input: 210 22% 85%;
+    --gradient-primary: linear-gradient(135deg, hsl(201 70% 45%), hsl(170 55% 40%));
+    --gradient-hero: linear-gradient(180deg, hsl(210 28% 98%), hsl(204 45% 95%));
+    --radius: 0.65rem;
+  }
+
+  :root[data-ui-mode='older'] body {
+    letter-spacing: 0.01em;
+    line-height: 1.55;
+  }
 }
 
 @layer utilities {

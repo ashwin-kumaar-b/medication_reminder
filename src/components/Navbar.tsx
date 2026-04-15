@@ -1,20 +1,36 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Shield, LayoutDashboard, Pill, GitCompareArrows, Apple, Menu, X, LogOut } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-import { useState } from 'react';
+import { Shield, LayoutDashboard, Pill, GitCompareArrows, Apple, Menu, X, LogOut, PlusCircle, Timer, AlertOctagon } from 'lucide-react';
+import { useAuth, UserRole } from '@/contexts/AuthContext';
+import { useMemo, useState } from 'react';
 
-const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/medicines', label: 'Medicines', icon: Pill },
-  { to: '/interaction-checker', label: 'Interactions', icon: GitCompareArrows },
-  { to: '/food-check', label: 'Food Check', icon: Apple },
-];
+const navByRole: Record<UserRole, Array<{ to: string; label: string; icon: any }>> = {
+  patient: [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/add-medicine', label: 'Add', icon: PlusCircle },
+    { to: '/medicines', label: 'Medicines', icon: Pill },
+    { to: '/interaction-checker', label: 'Interactions', icon: GitCompareArrows },
+    { to: '/food-check', label: 'Food Check', icon: Apple },
+    { to: '/can-i-take', label: 'Can I Take', icon: Timer },
+    { to: '/missed-doses', label: 'Missed Doses', icon: AlertOctagon },
+  ],
+  caretaker: [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/add-medicine', label: 'Add for Patient', icon: PlusCircle },
+    { to: '/medicines', label: 'Patient Medicines', icon: Pill },
+    { to: '/interaction-checker', label: 'Interactions', icon: GitCompareArrows },
+    { to: '/food-check', label: 'Food Check', icon: Apple },
+  ],
+};
 
 const Navbar = () => {
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, logout, user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const navItems = useMemo(() => {
+    if (!user) return [];
+    return navByRole[user.role] || [];
+  }, [user]);
 
   const handleLogout = () => {
     logout();

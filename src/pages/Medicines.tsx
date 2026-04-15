@@ -37,9 +37,17 @@ const Medicines = () => {
             <div key={med.id} className="animate-fade-in rounded-xl border border-border bg-card p-5 shadow-card transition-all hover:shadow-elevated" style={{ animationDelay: `${i * 0.05}s` }}>
               <div className="mb-3 flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className={`rounded-lg p-2 ${med.isActive ? 'bg-accent text-primary' : 'bg-muted text-muted-foreground'}`}>
-                    <Pill className="h-5 w-5" />
-                  </div>
+                  {med.photoUrl ? (
+                    <img
+                      src={med.photoUrl}
+                      alt={`${med.name} photo`}
+                      className="h-10 w-10 rounded-lg border border-border object-cover"
+                    />
+                  ) : (
+                    <div className={`rounded-lg p-2 ${med.isActive ? 'bg-accent text-primary' : 'bg-muted text-muted-foreground'}`}>
+                      <Pill className="h-5 w-5" />
+                    </div>
+                  )}
                   <div>
                     <h3 className="font-semibold text-foreground">{med.name}</h3>
                     <p className="text-sm text-muted-foreground">{med.dosage}</p>

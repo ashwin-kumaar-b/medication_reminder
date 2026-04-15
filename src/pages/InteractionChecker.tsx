@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { GitCompareArrows, Loader2, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { getOpenFdaSafety, getRxCui, getRxNavInteractions } from '@/lib/medicationApis';
 
 interface InteractionResult {
   severity: 'high' | 'moderate' | 'low' | 'none';
   description: string;
   drugs: string[];
+  source?: 'RxNav' | 'OpenFDA';
 }
 
 const severityConfig = {
@@ -23,14 +25,6 @@ const InteractionChecker = () => {
   const [checked, setChecked] = useState(false);
   const { toast } = useToast();
 
-  const getRxcui = async (name: string): Promise<string | null> => {
-    try {
-      const res = await fetch(`https://rxnav.nlm.nih.gov/REST/rxcui.json?name=${encodeURIComponent(name)}`);
-      const data = await res.json();
-      return data?.idGroup?.rxnormId?.[0] || null;
-    } catch { return null; }
-  };
-
   const handleCheck = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!drug1 || !drug2) return;
@@ -39,7 +33,7 @@ const InteractionChecker = () => {
     setChecked(false);
 
     try {
-      const [rxcui1, rxcui2] = await Promise.all([getRxcui(drug1), getRxcui(drug2)]);
+      const [rxcui1, rxcui2] = await Promise.all([getRxCui(drug1), getRxCui(drug2)]);
 
       if (!rxcui1 || !rxcui2) {
         toast({ title: 'Drug not found', description: `Could not find RxCUI for ${!rxcui1 ? drug1 : drug2}. Try a different spelling.`, variant: 'destructive' });
@@ -47,23 +41,33 @@ const InteractionChecker = () => {
         return;
       }
 
-      const res = await fetch(`https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${rxcui1}+${rxcui2}`);
-      const data = await res.json();
-
       const interactions: InteractionResult[] = [];
-      const pairs = data?.fullInteractionTypeGroup?.[0]?.fullInteractionType || [];
+      const rxNavItems = await getRxNavInteractions(rxcui1, rxcui2);
+      rxNavItems.forEach(item => {
+        interactions.push({ ...item, drugs: [drug1, drug2], source: 'RxNav' });
+      });
 
-      for (const pair of pairs) {
-        for (const ip of pair.interactionPair || []) {
-          const desc = ip.description || 'No details available';
-          const sev = ip.severity?.toLowerCase() || '';
-          const severity = sev.includes('high') ? 'high' : sev.includes('moderate') ? 'moderate' : 'low';
-          interactions.push({ severity, description: desc, drugs: [drug1, drug2] });
-        }
-      }
+      const [openFdaA, openFdaB] = await Promise.all([getOpenFdaSafety(drug1), getOpenFdaSafety(drug2)]);
+      const openFdaWarnings = [
+        ...(openFdaA?.warnings || []),
+        ...(openFdaA?.contraindications || []),
+        ...(openFdaB?.warnings || []),
+        ...(openFdaB?.contraindications || []),
+      ]
+        .filter(Boolean)
+        .slice(0, 2);
+
+      openFdaWarnings.forEach(warning => {
+        interactions.push({
+          severity: warning.toLowerCase().includes('contraindicated') ? 'high' : 'moderate',
+          description: warning,
+          drugs: [drug1, drug2],
+          source: 'OpenFDA',
+        });
+      });
 
       if (interactions.length === 0) {
-        interactions.push({ severity: 'none', description: `No known interactions found between ${drug1} and ${drug2}.`, drugs: [drug1, drug2] });
+        interactions.push({ severity: 'none', description: `No known interactions found between ${drug1} and ${drug2}.`, drugs: [drug1, drug2], source: 'RxNav' });
       }
 
       setResults(interactions);
@@ -113,11 +117,14 @@ const InteractionChecker = () => {
                   <span className="font-semibold">{cfg.label}</span>
                 </div>
                 <p className="text-sm leading-relaxed opacity-90">{r.description}</p>
+                <p className="mt-2 text-xs font-medium opacity-80">Source: {r.source || 'RxNav'}</p>
               </div>
             );
           })}
         </div>
       )}
+
+      <p className="mt-6 text-xs text-muted-foreground">Consult healthcare provider if unsure. This system supports adherence tracking and does not replace medical advice.</p>
     </div>
   );
 };

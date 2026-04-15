@@ -1,109 +1,265 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { Shield, Mail, ArrowRight, Loader2 } from 'lucide-react';
+import { Shield, Loader2 } from 'lucide-react';
+import { useAuth, UiMode, UserRole } from '@/contexts/AuthContext';
+import { attachOneSignalIdentity } from '@/lib/onesignal';
 import { useToast } from '@/hooks/use-toast';
 
-const Auth = () => {
-  const [step, setStep] = useState<'email' | 'otp'>('email');
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
-  const [otp, setOtp] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [generatedOtp, setGeneratedOtp] = useState('');
-  const { login } = useAuth();
-  const navigate = useNavigate();
-  const { toast } = useToast();
+const roleOptions: Array<{ value: UserRole; label: string }> = [
+  { value: 'patient', label: 'Patient' },
+  { value: 'caretaker', label: 'Caretaker' },
+];
 
-  const handleSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !name) return;
-    setLoading(true);
-    // Simulate OTP send
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setGeneratedOtp(code);
-    await new Promise(r => setTimeout(r, 1000));
-    setLoading(false);
-    setStep('otp');
-    toast({ title: 'OTP Sent!', description: `Demo OTP: ${code} (shown for testing)` });
+const uiModes: Array<{ value: UiMode; label: string }> = [
+  { value: 'younger', label: 'Younger Interface (vivid)' },
+  { value: 'older', label: 'Older Interface (simple)' },
+];
+
+const Auth = () => {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [loading, setLoading] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<UserRole>('patient');
+  const [age, setAge] = useState<string>('');
+  const [illness, setIllness] = useState('');
+  const [uiMode, setUiMode] = useState<UiMode>('younger');
+  const [linkedPatientId, setLinkedPatientId] = useState('');
+  const { register, login } = useAuth();
+  const { toast } = useToast();
+  const navigate = useNavigate();
+
+  const clearForm = () => {
+    setName('');
+    setEmail('');
+    setPassword('');
+    setRole('patient');
+    setAge('');
+    setIllness('');
+    setUiMode('younger');
+    setLinkedPatientId('');
   };
 
-  const handleVerifyOtp = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await new Promise(r => setTimeout(r, 800));
-    if (otp === generatedOtp) {
-      login({ id: crypto.randomUUID(), name, email });
-      toast({ title: 'Welcome!', description: `Logged in as ${name}` });
-      navigate('/dashboard');
-    } else {
-      toast({ title: 'Invalid OTP', description: 'Please try again.', variant: 'destructive' });
+
+    const response =
+      mode === 'register'
+        ? await register({
+            name,
+            email,
+            password,
+            role,
+            age: age ? Number(age) : undefined,
+            illness: role === 'patient' ? illness : undefined,
+            uiMode,
+            linkedPatientId: role === 'caretaker' && linkedPatientId ? linkedPatientId : undefined,
+          })
+        : await login({ email, password, role });
+
+    if (response.ok && response.needsEmailVerification) {
+      toast({
+        title: 'Account created',
+        description: 'Please verify your email, then log in.',
+      });
+      setMode('login');
+      setPassword('');
+      setLoading(false);
+      return;
     }
+
+    if (!response.ok || !response.user) {
+      toast({ title: 'Authentication failed', description: response.error, variant: 'destructive' });
+      setLoading(false);
+      return;
+    }
+
+    await attachOneSignalIdentity(response.user.id);
+    toast({
+      title: mode === 'register' ? 'Account created' : 'Welcome back',
+      description: `${response.user.name} signed in as ${response.user.role}.`,
+    });
+    clearForm();
+    navigate('/dashboard');
     setLoading(false);
   };
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center gradient-hero px-4">
-      <div className="w-full max-w-md animate-fade-in">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 inline-flex rounded-xl gradient-primary p-3">
+    <div className="gradient-hero flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-10">
+      <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-7 shadow-elevated">
+        <div className="mb-6 text-center">
+          <div className="mx-auto mb-3 inline-flex rounded-xl gradient-primary p-3">
             <Shield className="h-8 w-8 text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Welcome to MediGuard AI</h1>
-          <p className="text-sm text-muted-foreground">Sign in with OTP to continue</p>
+          <h1 className="text-3xl font-bold text-foreground">MediGuard Access</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Role-based login for Patients and Caretakers</p>
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-6 shadow-elevated">
-          {step === 'email' ? (
-            <form onSubmit={handleSendOtp} className="space-y-4">
+        <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-muted p-1">
+          <button
+            type="button"
+            onClick={() => setMode('login')}
+            className={`rounded-md py-2 text-sm font-semibold transition-colors ${
+              mode === 'login' ? 'bg-card text-foreground shadow-card' : 'text-muted-foreground'
+            }`}
+          >
+            Login
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('register')}
+            className={`rounded-md py-2 text-sm font-semibold transition-colors ${
+              mode === 'register' ? 'bg-card text-foreground shadow-card' : 'text-muted-foreground'
+            }`}
+          >
+            Register
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'register' && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Name</label>
+              <input
+                value={name}
+                onChange={e => setName(e.target.value)}
+                required
+                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+                placeholder="Full name"
+              />
+            </div>
+          )}
+
+          {mode === 'register' && (
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">Full Name</label>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">Age</label>
                 <input
-                  type="text"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  placeholder="John Doe"
+                  value={age}
+                  onChange={e => {
+                    const nextAge = e.target.value;
+                    setAge(nextAge);
+                    if (nextAge && Number(nextAge) >= 55) setUiMode('older');
+                  }}
+                  type="number"
+                  min={1}
+                  max={120}
                   required
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  placeholder="e.g. 67"
                 />
               </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">Email Address</label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              {role === 'patient' && (
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">Main Illness / Condition</label>
                   <input
-                    type="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="you@example.com"
+                    value={illness}
+                    onChange={e => setIllness(e.target.value)}
                     required
-                    className="w-full rounded-lg border border-input bg-background py-2.5 pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    placeholder="e.g. Diabetes"
                   />
                 </div>
-              </div>
-              <button type="submit" disabled={loading} className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><span>Send OTP</span><ArrowRight className="h-4 w-4" /></>}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleVerifyOtp} className="space-y-4">
-              <p className="text-center text-sm text-muted-foreground">Enter the 6-digit code sent to <strong className="text-foreground">{email}</strong></p>
-              <input
-                type="text"
-                value={otp}
-                onChange={e => setOtp(e.target.value)}
-                placeholder="000000"
-                maxLength={6}
-                className="w-full rounded-lg border border-input bg-background px-3 py-3 text-center text-2xl font-bold tracking-[0.5em] text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
-              />
-              <button type="submit" disabled={loading} className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify & Login'}
-              </button>
-              <button type="button" onClick={() => setStep('email')} className="w-full text-center text-sm text-muted-foreground hover:text-foreground">
-                ← Back
-              </button>
-            </form>
+              )}
+            </div>
           )}
+
+          {mode === 'register' && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Preferred Interface</label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {uiModes.map(modeOption => (
+                  <button
+                    key={modeOption.value}
+                    type="button"
+                    onClick={() => setUiMode(modeOption.value)}
+                    className={`rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${
+                      uiMode === modeOption.value
+                        ? 'border-primary bg-accent text-accent-foreground'
+                        : 'border-border text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    {modeOption.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">Email</label>
+            <input
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              type="email"
+              required
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+              placeholder="you@example.com"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">Password</label>
+            <input
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              type="password"
+              required
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+              placeholder="Minimum 8 characters"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">Role</label>
+            <div className="grid grid-cols-2 gap-2">
+              {roleOptions.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    setRole(option.value);
+                    if (option.value === 'caretaker') {
+                      setIllness('');
+                    }
+                  }}
+                  className={`rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${
+                    role === option.value
+                      ? 'border-primary bg-accent text-accent-foreground'
+                      : 'border-border text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {mode === 'register' && role === 'caretaker' && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Link Existing Patient ID (optional)</label>
+              <input
+                value={linkedPatientId}
+                onChange={e => setLinkedPatientId(e.target.value)}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+                placeholder="Enter patient ID if already created"
+              />
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
+          >
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : mode === 'register' ? 'Create Account' : 'Login'}
+          </button>
+        </form>
+
+        <div className="mt-5 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+          Demo accounts: patient@mediguard.demo / demo1234 and caretaker@mediguard.demo / demo1234
         </div>
       </div>
     </div>
