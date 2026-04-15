@@ -136,6 +136,10 @@ interface MedicineContextType {
   medicines: LegacyMedicine[];
   doseLogs: LegacyDoseLog[];
   addMedication: (med: Omit<Medication, 'id' | 'createdAt'>) => Promise<Medication | null>;
+  updateMedication: (
+    id: string,
+    updates: Partial<Pick<Medication, 'drugName' | 'dosage' | 'photoUrl' | 'category' | 'criticality' | 'scheduleTime' | 'frequency'>>,
+  ) => Promise<Medication | null>;
   removeMedication: (id: string) => Promise<void>;
   markDoseStatus: (medicationId: string, status: Extract<DoseStatus, 'taken' | 'delayed' | 'skipped'>) => Promise<void>;
   refreshMonitoring: (patientId?: string) => Promise<void>;
@@ -523,6 +527,46 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
     ]);
   };
 
+  const updateMedication = async (
+    id: string,
+    updates: Partial<Pick<Medication, 'drugName' | 'dosage' | 'photoUrl' | 'category' | 'criticality' | 'scheduleTime' | 'frequency'>>,
+  ) => {
+    const existing = medications.find(entry => entry.id === id);
+    if (!existing || !isPatientVisible(existing.patientId)) return null;
+
+    const next: Medication = {
+      ...existing,
+      ...updates,
+    };
+
+    setMedications(prev => prev.map(entry => (entry.id === id ? next : entry)));
+
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from('medications')
+        .update({
+          drug_name: next.drugName,
+          dosage: next.dosage,
+          photo_url: next.photoUrl ?? null,
+          category: next.category,
+          criticality: next.criticality,
+          schedule_time: next.scheduleTime,
+          frequency: next.frequency,
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (!error && data) {
+        const mapped = mapMedicationRow(data);
+        setMedications(prev => prev.map(entry => (entry.id === id ? mapped : entry)));
+        return mapped;
+      }
+    }
+
+    return next;
+  };
+
   const markDoseStatus = async (
     medicationId: string,
     status: Extract<DoseStatus, 'taken' | 'delayed' | 'skipped'>,
@@ -769,6 +813,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       medicines,
       doseLogs,
       addMedication,
+      updateMedication,
       removeMedication,
       markDoseStatus,
       refreshMonitoring,
@@ -783,6 +828,14 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       scopedNotifications,
       medicines,
       doseLogs,
+      addMedication,
+      updateMedication,
+      removeMedication,
+      markDoseStatus,
+      refreshMonitoring,
+      getPatientDashboardData,
+      getCaretakerDashboardData,
+      addMedicine,
       users,
       user,
       visiblePatientIds,

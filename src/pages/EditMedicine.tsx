@@ -1,10 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Loader2, Pill, Save } from 'lucide-react';
 import { useMedicines } from '@/contexts/MedicineContext';
-import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { Pill, Loader2, ArrowLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { searchRxNavSuggestions } from '@/lib/medicationApis';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -31,15 +29,42 @@ const dosageUnitOptions = [
 
 type DosageUnit = (typeof dosageUnitOptions)[number]['value'];
 
-const AddMedicine = () => {
-  const { addMedication } = useMedicines();
-  const { user } = useAuth();
-  const { toast } = useToast();
+const parseDosage = (value: string): { amount: string; unit: DosageUnit } => {
+  const normalized = value.trim().toLowerCase();
+  const match = normalized.match(/^(\d+(?:\.\d+)?)\s*(pill|pills|mg|ml)$/i);
+  if (!match) return { amount: '', unit: 'pill' };
+
+  const rawUnit = match[2].toLowerCase();
+  const unit: DosageUnit = rawUnit === 'pills' ? 'pill' : (rawUnit as DosageUnit);
+  return { amount: match[1], unit };
+};
+
+const formatDosage = (amount: string, unit: DosageUnit) => {
+  const parsed = Number(amount);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+
+  const displayAmount = Number.isInteger(parsed)
+    ? String(parsed)
+    : parsed.toFixed(2).replace(/\.00$/, '').replace(/0$/, '');
+
+  if (unit === 'pill') {
+    return `${displayAmount} ${parsed === 1 ? 'pill' : 'pills'}`;
+  }
+
+  return `${displayAmount} ${unit}`;
+};
+
+const EditMedicine = () => {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const { medications, updateMedication } = useMedicines();
+
+  const medication = useMemo(() => medications.find(item => item.id === id), [id, medications]);
+
   const [loading, setLoading] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ name: string; rxcui: string }>>([]);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
     dosageAmount: '',
@@ -51,16 +76,21 @@ const AddMedicine = () => {
     criticality: 'medium' as 'low' | 'medium' | 'high',
   });
 
-  const formatDosage = (amount: string, unit: DosageUnit) => {
-    const parsed = Number(amount);
-    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  useEffect(() => {
+    if (!medication) return;
 
-    const displayAmount = Number.isInteger(parsed) ? String(parsed) : parsed.toFixed(2).replace(/\.00$/, '').replace(/0$/, '');
-    if (unit === 'pill') {
-      return `${displayAmount} ${parsed === 1 ? 'pill' : 'pills'}`;
-    }
-    return `${displayAmount} ${unit}`;
-  };
+    const dosage = parseDosage(medication.dosage);
+    setForm({
+      name: medication.drugName,
+      dosageAmount: dosage.amount,
+      dosageUnit: dosage.unit,
+      photoUrl: medication.photoUrl || '',
+      frequency: medication.frequency,
+      scheduleTime: medication.scheduleTime,
+      category: medication.category,
+      criticality: medication.criticality,
+    });
+  }, [medication]);
 
   useEffect(() => {
     const query = form.name.trim();
@@ -87,7 +117,6 @@ const AddMedicine = () => {
   const handlePhotoSelect = async (file?: File) => {
     if (!file) {
       setForm(prev => ({ ...prev, photoUrl: '' }));
-      setPhotoPreview(null);
       return;
     }
 
@@ -109,24 +138,11 @@ const AddMedicine = () => {
     });
 
     setForm(prev => ({ ...prev, photoUrl: dataUrl }));
-    setPhotoPreview(dataUrl);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
-
-    const patientId = user.role === 'patient' ? user.id : user.linkedPatientId;
-    if (!patientId) {
-      toast({
-        title: 'No linked patient',
-        description: 'Caretaker accounts need at least one linked patient before adding medications.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setLoading(true);
+    if (!medication) return;
 
     const dosage = formatDosage(form.dosageAmount, form.dosageUnit);
     if (!dosage) {
@@ -135,13 +151,12 @@ const AddMedicine = () => {
         description: 'Enter a valid dosage amount greater than 0.',
         variant: 'destructive',
       });
-      setLoading(false);
       return;
     }
 
-    const created = await addMedication({
-      patientId,
-      drugName: form.name,
+    setLoading(true);
+    const updated = await updateMedication(medication.id, {
+      drugName: form.name.trim(),
       dosage,
       photoUrl: form.photoUrl || undefined,
       category: form.category,
@@ -150,21 +165,34 @@ const AddMedicine = () => {
       frequency: form.frequency,
     });
 
-    if (!created) {
-      toast({ title: 'Unable to add medicine', description: 'Please check your access scope and try again.', variant: 'destructive' });
+    if (!updated) {
+      toast({ title: 'Update failed', description: 'Unable to update medication right now.', variant: 'destructive' });
       setLoading(false);
       return;
     }
 
-    toast({ title: 'Medicine Added', description: `${form.name} has been added with risk tracking enabled.` });
+    toast({ title: 'Medicine updated', description: `${updated.drugName} was saved successfully.` });
     setLoading(false);
     navigate('/medicines');
   };
 
+  if (!medication) {
+    return (
+      <div className="container mx-auto max-w-2xl px-4 py-8">
+        <Link to="/medicines" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back to Medicines
+        </Link>
+        <div className="mt-6 rounded-xl border border-border bg-card p-6 text-center shadow-card">
+          <p className="text-sm text-muted-foreground">Medicine not found or no longer accessible.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto max-w-2xl px-4 py-8">
-      <Link to="/dashboard" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" /> Back to Dashboard
+      <Link to="/medicines" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="h-4 w-4" /> Back to Medicines
       </Link>
       <div className="animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
         <div className="mb-6 flex items-center gap-3">
@@ -172,10 +200,11 @@ const AddMedicine = () => {
             <Pill className="h-5 w-5 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-foreground">Add Medicine</h1>
-            <p className="text-sm text-muted-foreground">Enter your medication details</p>
+            <h1 className="text-xl font-bold text-foreground">Edit Medicine</h1>
+            <p className="text-sm text-muted-foreground">Update medication details</p>
           </div>
         </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -255,13 +284,16 @@ const AddMedicine = () => {
               className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-sm file:font-medium"
             />
             <p className="mt-1 text-xs text-muted-foreground">Optional. JPG/PNG/WebP up to 2 MB.</p>
-            {photoPreview && (
-              <div className="mt-2">
-                <img
-                  src={photoPreview}
-                  alt="Medication preview"
-                  className="h-20 w-20 rounded-lg border border-border object-cover"
-                />
+            {form.photoUrl && (
+              <div className="mt-2 flex items-center gap-3">
+                <img src={form.photoUrl} alt="Medication preview" className="h-20 w-20 rounded-lg border border-border object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, photoUrl: '' }))}
+                  className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+                >
+                  Remove Photo
+                </button>
               </div>
             )}
           </div>
@@ -270,25 +302,34 @@ const AddMedicine = () => {
             <label className="mb-1.5 block text-sm font-medium text-foreground">Frequency</label>
             <div className="flex gap-2">
               {(['daily', 'twice', 'weekly'] as const).map(f => (
-                <button key={f} type="button" onClick={() => setForm(prev => ({ ...prev, frequency: f }))}
-                  className={`rounded-lg border px-4 py-2 text-sm font-medium capitalize transition-colors ${form.frequency === f ? 'border-primary bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:bg-muted'}`}>
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, frequency: f }))}
+                  className={`rounded-lg border px-4 py-2 text-sm font-medium capitalize transition-colors ${
+                    form.frequency === f ? 'border-primary bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:bg-muted'
+                  }`}
+                >
                   {f === 'daily' ? 'Daily' : f === 'twice' ? 'Twice Daily' : 'Weekly'}
                 </button>
               ))}
             </div>
           </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-foreground">Schedule Time</label>
-              <input type="time" required value={form.scheduleTime} onChange={e => setForm(f => ({ ...f, scheduleTime: e.target.value }))}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20" />
+              <input
+                type="time"
+                required
+                value={form.scheduleTime}
+                onChange={e => setForm(f => ({ ...f, scheduleTime: e.target.value }))}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+              />
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-foreground">Medication Category</label>
-              <Select
-                value={form.category}
-                onValueChange={value => setForm(prev => ({ ...prev, category: value as typeof form.category }))}
-              >
+              <Select value={form.category} onValueChange={value => setForm(prev => ({ ...prev, category: value as typeof form.category }))}>
                 <SelectTrigger className="w-full rounded-lg">
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
@@ -302,6 +343,7 @@ const AddMedicine = () => {
               </Select>
             </div>
           </div>
+
           <div>
             <label className="mb-1.5 block text-sm font-medium text-foreground">Criticality Level</label>
             <div className="grid grid-cols-3 gap-2">
@@ -319,9 +361,14 @@ const AddMedicine = () => {
               ))}
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">Consult healthcare provider if unsure. This system supports adherence tracking and does not replace medical advice.</p>
-          <button type="submit" disabled={loading} className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add Medicine'}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {loading ? 'Saving...' : 'Save Changes'}
           </button>
         </form>
       </div>
@@ -329,4 +376,4 @@ const AddMedicine = () => {
   );
 };
 
-export default AddMedicine;
+export default EditMedicine;

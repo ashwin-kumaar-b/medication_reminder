@@ -1,6 +1,6 @@
 import { useMedicines } from '@/contexts/MedicineContext';
 import { useToast } from '@/hooks/use-toast';
-import { Pill, Trash2, Clock, Plus } from 'lucide-react';
+import { Pill, Trash2, Clock, Plus, Pencil } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const Medicines = () => {
@@ -61,7 +61,10 @@ const Medicines = () => {
                 <div className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> {med.frequency} — {med.timeSlots.join(', ')}</div>
                 {med.foodInstructions && <p className="italic">📋 {med.foodInstructions}</p>}
               </div>
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                <Link to={`/edit-medicine/${med.id}`} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-foreground hover:bg-muted">
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </Link>
                 <button onClick={() => handleDelete(med.id, med.name)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10">
                   <Trash2 className="h-3.5 w-3.5" /> Remove
                 </button>

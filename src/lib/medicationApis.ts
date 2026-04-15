@@ -1,6 +1,8 @@
 const OPENFDA_API_KEY = import.meta.env.VITE_OPENFDA_API_KEY as string | undefined;
 const USDA_API_KEY = import.meta.env.VITE_USDA_API_KEY as string | undefined;
 
+const ALLOWED_RXNAV_TTYS = new Set(['IN', 'PIN', 'MIN', 'SCD', 'SBD', 'SCDC', 'SBDC']);
+
 export interface DrugSuggestion {
   name: string;
   rxcui: string;
@@ -24,6 +26,24 @@ export interface UsdaFoodMatch {
 
 const clean = (value?: string) => (value || '').replace(/\s+/g, ' ').trim();
 
+const normalizeDrugName = (name: string) => clean(name).replace(/^\{+/, '').replace(/\}+$/, '').trim();
+
+const isNoisySuggestion = (name: string) => {
+  const lower = name.toLowerCase();
+  return lower.includes('{') || lower.includes('}') || lower.includes(' pack') || lower.length > 90;
+};
+
+const getSuggestionScore = (name: string, term: string) => {
+  const normalizedName = name.toLowerCase();
+  const normalizedTerm = term.toLowerCase();
+
+  if (normalizedName === normalizedTerm) return 100;
+  if (normalizedName.startsWith(normalizedTerm)) return 80;
+  if (normalizedName.includes(` ${normalizedTerm}`)) return 60;
+  if (normalizedName.includes(normalizedTerm)) return 40;
+  return 10;
+};
+
 export const searchRxNavSuggestions = async (term: string): Promise<DrugSuggestion[]> => {
   if (!term.trim()) return [];
 
@@ -33,20 +53,28 @@ export const searchRxNavSuggestions = async (term: string): Promise<DrugSuggesti
 
   const suggestions: DrugSuggestion[] = [];
   groups.forEach((group: any) => {
+    if (group?.tty && !ALLOWED_RXNAV_TTYS.has(group.tty)) {
+      return;
+    }
+
     const concepts = group?.conceptProperties || [];
     concepts.forEach((concept: any) => {
       if (!concept?.name || !concept?.rxcui) return;
-      suggestions.push({ name: concept.name, rxcui: concept.rxcui });
+      const normalizedName = normalizeDrugName(concept.name);
+      if (!normalizedName || isNoisySuggestion(normalizedName)) return;
+      suggestions.push({ name: normalizedName, rxcui: concept.rxcui });
     });
   });
 
   const deduped = new Map<string, DrugSuggestion>();
   suggestions.forEach(item => {
-    const key = `${item.name.toLowerCase()}-${item.rxcui}`;
+    const key = item.name.toLowerCase();
     if (!deduped.has(key)) deduped.set(key, item);
   });
 
-  return Array.from(deduped.values()).slice(0, 8);
+  return Array.from(deduped.values())
+    .sort((a, b) => getSuggestionScore(b.name, term) - getSuggestionScore(a.name, term))
+    .slice(0, 8);
 };
 
 export const getRxCui = async (drugName: string): Promise<string | null> => {

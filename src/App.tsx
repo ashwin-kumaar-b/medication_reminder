@@ -11,6 +11,7 @@ import Landing from "@/pages/Landing";
 import Auth from "@/pages/Auth";
 import Dashboard from "@/pages/Dashboard";
 import AddMedicine from "@/pages/AddMedicine";
+import EditMedicine from "@/pages/EditMedicine";
 import Medicines from "@/pages/Medicines";
 import InteractionChecker from "@/pages/InteractionChecker";
 import FoodCheck from "@/pages/FoodCheck";
@@ -35,6 +36,7 @@ const App = () => (
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                   <Route path="/add-medicine" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><AddMedicine /></ProtectedRoute>} />
+                  <Route path="/edit-medicine/:id" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><EditMedicine /></ProtectedRoute>} />
                   <Route path="/medicines" element={<ProtectedRoute><Medicines /></ProtectedRoute>} />
                   <Route path="/interaction-checker" element={<ProtectedRoute><InteractionChecker /></ProtectedRoute>} />
                   <Route path="/food-check" element={<ProtectedRoute><FoodCheck /></ProtectedRoute>} />
