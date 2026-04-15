@@ -7,7 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 
 const Dashboard = () => {
   const { user, createPatientForCaretaker, getLinkedPatients } = useAuth();
-  const { medicines, doseLogs, getCaretakerDashboardData } = useMedicines();
+  const { medicines, doseLogs, getCaretakerDashboardData, getPatientDashboardData } = useMedicines();
   const { toast } = useToast();
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [savingPatient, setSavingPatient] = useState(false);
@@ -23,6 +23,32 @@ const Dashboard = () => {
   const linkedPatients = useMemo(() => getLinkedPatients(user?.id), [getLinkedPatients, user?.id]);
   const activePatientId = selectedPatientId || linkedPatients[0]?.id;
   const caretakerView = activePatientId ? getCaretakerDashboardData(activePatientId) : null;
+  const patientView = user?.id ? getPatientDashboardData(user.id) : null;
+
+  const nextDoseGroup = useMemo(() => {
+    if (!patientView) return null;
+
+    const actionable = patientView.today
+      .filter(item => item.status === 'pending' || item.status === 'delayed')
+      .map(item => ({
+        ...item,
+        scheduledAt: new Date(`${new Date().toISOString().slice(0, 10)}T${item.medication.scheduleTime}:00`),
+      }))
+      .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
+
+    if (actionable.length === 0) return null;
+
+    const nextTime = actionable[0].medication.scheduleTime;
+    const items = actionable.filter(entry => entry.medication.scheduleTime === nextTime);
+    const now = new Date();
+
+    return {
+      items,
+      time: nextTime,
+      isOverdue: items[0].scheduledAt.getTime() <= now.getTime(),
+      minutesUntil: Math.max(0, Math.floor((items[0].scheduledAt.getTime() - now.getTime()) / 60000)),
+    };
+  }, [patientView]);
 
   const activeMeds = medicines.filter(m => m.isActive);
   const missedDoses = doseLogs.filter(l => l.status === 'missed').length;
@@ -232,6 +258,44 @@ const Dashboard = () => {
           </div>
         ))}
       </div>
+
+      <section className="mb-8 rounded-xl border border-border bg-card p-5 shadow-card">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-foreground">
+            {nextDoseGroup?.items.length && nextDoseGroup.items.length > 1 ? 'Next Medicines to Take' : 'Next Medicine to Take'}
+          </h2>
+          {nextDoseGroup && (
+            <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground">
+              {nextDoseGroup.time}
+            </span>
+          )}
+        </div>
+
+        {!nextDoseGroup ? (
+          <p className="text-sm text-muted-foreground">You are all caught up. No pending medicines for the rest of today.</p>
+        ) : (
+          <>
+            <p className="mb-4 text-sm text-muted-foreground">
+              {nextDoseGroup.isOverdue
+                ? 'These medicines are due now. Please take them as soon as possible.'
+                : `Upcoming dose window in ${nextDoseGroup.minutesUntil} minute(s).`}
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {nextDoseGroup.items.map(item => (
+                <div key={item.medication.id} className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="mb-1 flex items-center justify-between">
+                    <p className="font-semibold text-foreground">{item.medication.drugName}</p>
+                    <span className="text-xs font-medium uppercase text-muted-foreground">{item.medication.criticality}</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{item.medication.dosage}</p>
+                  <p className="text-xs text-muted-foreground">Category: {item.medication.category}</p>
+                  <p className="text-xs text-muted-foreground">Scheduled at: {item.medication.scheduleTime}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
 
       {/* Quick Actions */}
       <h2 className="mb-4 text-lg font-semibold text-foreground">Quick Actions</h2>

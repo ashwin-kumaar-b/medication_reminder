@@ -27,6 +27,11 @@ const dosageUnitOptions = [
   { value: 'ml', label: 'ml' },
 ] as const;
 
+const foodTimingOptions = [
+  { value: 'before-food', label: 'Before Food' },
+  { value: 'after-food', label: 'After Food' },
+] as const;
+
 type DosageUnit = (typeof dosageUnitOptions)[number]['value'];
 
 const parseDosage = (value: string): { amount: string; unit: DosageUnit } => {
@@ -70,6 +75,7 @@ const EditMedicine = () => {
     dosageAmount: '',
     dosageUnit: 'pill' as DosageUnit,
     photoUrl: '',
+    foodTiming: 'before-food' as 'before-food' | 'after-food',
     frequency: 'daily' as 'daily' | 'twice' | 'weekly',
     scheduleTime: '08:00',
     category: 'other' as 'blood-pressure' | 'diabetes' | 'thyroid' | 'antibiotic' | 'blood-thinner' | 'other',
@@ -85,6 +91,7 @@ const EditMedicine = () => {
       dosageAmount: dosage.amount,
       dosageUnit: dosage.unit,
       photoUrl: medication.photoUrl || '',
+      foodTiming: medication.foodTiming,
       frequency: medication.frequency,
       scheduleTime: medication.scheduleTime,
       category: medication.category,
@@ -159,6 +166,7 @@ const EditMedicine = () => {
       drugName: form.name.trim(),
       dosage,
       photoUrl: form.photoUrl || undefined,
+      foodTiming: form.foodTiming,
       category: form.category,
       criticality: form.criticality,
       scheduleTime: form.scheduleTime,
@@ -311,6 +319,26 @@ const EditMedicine = () => {
                   }`}
                 >
                   {f === 'daily' ? 'Daily' : f === 'twice' ? 'Twice Daily' : 'Weekly'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">Food Timing</label>
+            <div className="grid grid-cols-2 gap-2">
+              {foodTimingOptions.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, foodTiming: option.value }))}
+                  className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                    form.foodTiming === option.value
+                      ? 'border-primary bg-accent text-accent-foreground'
+                      : 'border-border text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {option.label}
                 </button>
               ))}
             </div>

@@ -20,6 +20,7 @@ export interface Medication {
   drugName: string;
   dosage: string;
   photoUrl?: string;
+  foodTiming: 'before-food' | 'after-food';
   category: MedicationCategory;
   criticality: CriticalityLevel;
   scheduleTime: string;
@@ -138,7 +139,7 @@ interface MedicineContextType {
   addMedication: (med: Omit<Medication, 'id' | 'createdAt'>) => Promise<Medication | null>;
   updateMedication: (
     id: string,
-    updates: Partial<Pick<Medication, 'drugName' | 'dosage' | 'photoUrl' | 'category' | 'criticality' | 'scheduleTime' | 'frequency'>>,
+    updates: Partial<Pick<Medication, 'drugName' | 'dosage' | 'photoUrl' | 'foodTiming' | 'category' | 'criticality' | 'scheduleTime' | 'frequency'>>,
   ) => Promise<Medication | null>;
   removeMedication: (id: string) => Promise<void>;
   markDoseStatus: (medicationId: string, status: Extract<DoseStatus, 'taken' | 'delayed' | 'skipped'>) => Promise<void>;
@@ -189,6 +190,7 @@ const mapMedicationRow = (row: any): Medication => ({
   drugName: row.drug_name,
   dosage: row.dosage,
   photoUrl: row.photo_url || undefined,
+  foodTiming: row.food_timing || 'before-food',
   category: row.category,
   criticality: row.criticality,
   scheduleTime: row.schedule_time,
@@ -224,7 +226,13 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
   const { user, users, getLinkedPatients } = useAuth();
   const [medications, setMedications] = useState<Medication[]>(() => {
     const stored = localStorage.getItem('mediguard_medications');
-    return stored ? JSON.parse(stored) : [];
+    if (!stored) return [];
+
+    const parsed = JSON.parse(stored) as Array<Partial<Medication>>;
+    return parsed.map(item => ({
+      ...(item as Medication),
+      foodTiming: item.foodTiming === 'after-food' ? 'after-food' : 'before-food',
+    }));
   });
   const [logs, setLogs] = useState<MedicationLog[]>(() => {
     const stored = localStorage.getItem('mediguard_logs');
@@ -482,6 +490,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
 
     const newMedication: Medication = {
       ...med,
+      foodTiming: med.foodTiming === 'after-food' ? 'after-food' : 'before-food',
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
     };
@@ -495,6 +504,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
           drug_name: med.drugName,
           dosage: med.dosage,
           photo_url: med.photoUrl ?? null,
+            food_timing: med.foodTiming === 'after-food' ? 'after-food' : 'before-food',
           category: med.category,
           criticality: med.criticality,
           schedule_time: med.scheduleTime,
@@ -529,7 +539,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
 
   const updateMedication = async (
     id: string,
-    updates: Partial<Pick<Medication, 'drugName' | 'dosage' | 'photoUrl' | 'category' | 'criticality' | 'scheduleTime' | 'frequency'>>,
+    updates: Partial<Pick<Medication, 'drugName' | 'dosage' | 'photoUrl' | 'foodTiming' | 'category' | 'criticality' | 'scheduleTime' | 'frequency'>>,
   ) => {
     const existing = medications.find(entry => entry.id === id);
     if (!existing || !isPatientVisible(existing.patientId)) return null;
@@ -537,6 +547,14 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
     const next: Medication = {
       ...existing,
       ...updates,
+      foodTiming:
+        updates.foodTiming === 'after-food'
+          ? 'after-food'
+          : updates.foodTiming === 'before-food'
+          ? 'before-food'
+          : existing.foodTiming === 'after-food'
+          ? 'after-food'
+          : 'before-food',
     };
 
     setMedications(prev => prev.map(entry => (entry.id === id ? next : entry)));
@@ -548,6 +566,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
           drug_name: next.drugName,
           dosage: next.dosage,
           photo_url: next.photoUrl ?? null,
+          food_timing: next.foodTiming,
           category: next.category,
           criticality: next.criticality,
           schedule_time: next.scheduleTime,
@@ -773,7 +792,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       timeSlots: [med.scheduleTime],
       startDate: med.createdAt?.slice(0, 10) || toDateKey(new Date()),
       endDate: '',
-      foodInstructions: '',
+      foodInstructions: med.foodTiming === 'after-food' ? 'Take after food' : 'Take before food',
       isActive: true,
     }));
   }, [scopedMedications]);
@@ -798,6 +817,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       patientId: userPatientId,
       drugName: med.name,
       dosage: med.dosage,
+      foodTiming: med.foodInstructions.toLowerCase().includes('after') ? 'after-food' : 'before-food',
       category: 'other',
       criticality: 'medium',
       scheduleTime: med.timeSlots[0] || '08:00',

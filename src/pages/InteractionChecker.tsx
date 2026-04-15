@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { GitCompareArrows, Loader2, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useMedicines } from '@/contexts/MedicineContext';
 import { getOpenFdaSafety, getRxCui, getRxNavInteractions } from '@/lib/medicationApis';
 
 interface InteractionResult {
@@ -18,12 +19,120 @@ const severityConfig = {
 };
 
 const InteractionChecker = () => {
+  const { medicines } = useMedicines();
   const [drug1, setDrug1] = useState('');
   const [drug2, setDrug2] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<InteractionResult[]>([]);
   const [checked, setChecked] = useState(false);
   const { toast } = useToast();
+
+  const activeMedicineNames = useMemo(() => {
+    const unique = new Map<string, string>();
+    medicines
+      .filter(med => med.isActive)
+      .forEach(med => {
+        const normalized = med.name.trim().toLowerCase();
+        if (!normalized || unique.has(normalized)) return;
+        unique.set(normalized, med.name.trim());
+      });
+    return Array.from(unique.values());
+  }, [medicines]);
+
+  const buildPairs = (drugs: string[]) => {
+    const pairs: Array<[string, string]> = [];
+    for (let i = 0; i < drugs.length; i += 1) {
+      for (let j = i + 1; j < drugs.length; j += 1) {
+        pairs.push([drugs[i], drugs[j]]);
+      }
+    }
+    return pairs;
+  };
+
+  const checkPair = async (leftDrug: string, rightDrug: string): Promise<InteractionResult[]> => {
+    const [rxcui1, rxcui2] = await Promise.all([getRxCui(leftDrug), getRxCui(rightDrug)]);
+
+    if (!rxcui1 || !rxcui2) {
+      return [
+        {
+          severity: 'moderate',
+          description: `Could not fully resolve RxNorm IDs for ${leftDrug} and ${rightDrug}. Please verify spellings.`,
+          drugs: [leftDrug, rightDrug],
+          source: 'RxNav',
+        },
+      ];
+    }
+
+    const interactions: InteractionResult[] = [];
+    const rxNavItems = await getRxNavInteractions(rxcui1, rxcui2);
+    rxNavItems.forEach(item => {
+      interactions.push({ ...item, drugs: [leftDrug, rightDrug], source: 'RxNav' });
+    });
+
+    const [openFdaA, openFdaB] = await Promise.all([getOpenFdaSafety(leftDrug), getOpenFdaSafety(rightDrug)]);
+    const openFdaWarnings = [
+      ...(openFdaA?.warnings || []),
+      ...(openFdaA?.contraindications || []),
+      ...(openFdaB?.warnings || []),
+      ...(openFdaB?.contraindications || []),
+    ]
+      .filter(Boolean)
+      .slice(0, 2);
+
+    openFdaWarnings.forEach(warning => {
+      interactions.push({
+        severity: warning.toLowerCase().includes('contraindicated') ? 'high' : 'moderate',
+        description: warning,
+        drugs: [leftDrug, rightDrug],
+        source: 'OpenFDA',
+      });
+    });
+
+    if (interactions.length === 0) {
+      interactions.push({
+        severity: 'none',
+        description: `No known interactions found between ${leftDrug} and ${rightDrug}.`,
+        drugs: [leftDrug, rightDrug],
+        source: 'RxNav',
+      });
+    }
+
+    return interactions;
+  };
+
+  const handleCheckMyMedicines = async () => {
+    if (activeMedicineNames.length < 2) {
+      toast({ title: 'Not enough medicines', description: 'Add at least two active medicines to check interactions.', variant: 'destructive' });
+      return;
+    }
+
+    setLoading(true);
+    setResults([]);
+    setChecked(false);
+
+    try {
+      const pairs = buildPairs(activeMedicineNames);
+      const interactions: InteractionResult[] = [];
+
+      for (const [leftDrug, rightDrug] of pairs) {
+        const pairResults = await checkPair(leftDrug, rightDrug);
+        interactions.push(...pairResults);
+      }
+
+      setResults(interactions);
+      setChecked(true);
+    } catch {
+      toast({ title: 'Error', description: 'Failed to auto-check medicine interactions. Try again.', variant: 'destructive' });
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (activeMedicineNames.length >= 2 && !checked && !loading) {
+      void handleCheckMyMedicines();
+    }
+  }, [activeMedicineNames]);
 
   const handleCheck = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,43 +142,7 @@ const InteractionChecker = () => {
     setChecked(false);
 
     try {
-      const [rxcui1, rxcui2] = await Promise.all([getRxCui(drug1), getRxCui(drug2)]);
-
-      if (!rxcui1 || !rxcui2) {
-        toast({ title: 'Drug not found', description: `Could not find RxCUI for ${!rxcui1 ? drug1 : drug2}. Try a different spelling.`, variant: 'destructive' });
-        setLoading(false);
-        return;
-      }
-
-      const interactions: InteractionResult[] = [];
-      const rxNavItems = await getRxNavInteractions(rxcui1, rxcui2);
-      rxNavItems.forEach(item => {
-        interactions.push({ ...item, drugs: [drug1, drug2], source: 'RxNav' });
-      });
-
-      const [openFdaA, openFdaB] = await Promise.all([getOpenFdaSafety(drug1), getOpenFdaSafety(drug2)]);
-      const openFdaWarnings = [
-        ...(openFdaA?.warnings || []),
-        ...(openFdaA?.contraindications || []),
-        ...(openFdaB?.warnings || []),
-        ...(openFdaB?.contraindications || []),
-      ]
-        .filter(Boolean)
-        .slice(0, 2);
-
-      openFdaWarnings.forEach(warning => {
-        interactions.push({
-          severity: warning.toLowerCase().includes('contraindicated') ? 'high' : 'moderate',
-          description: warning,
-          drugs: [drug1, drug2],
-          source: 'OpenFDA',
-        });
-      });
-
-      if (interactions.length === 0) {
-        interactions.push({ severity: 'none', description: `No known interactions found between ${drug1} and ${drug2}.`, drugs: [drug1, drug2], source: 'RxNav' });
-      }
-
+      const interactions = await checkPair(drug1, drug2);
       setResults(interactions);
       setChecked(true);
     } catch {
@@ -82,10 +155,37 @@ const InteractionChecker = () => {
     <div className="container mx-auto max-w-2xl px-4 py-8">
       <div className="mb-6 animate-fade-in">
         <h1 className="text-2xl font-bold text-foreground">Drug Interaction Checker</h1>
-        <p className="text-muted-foreground">Check if two medications are safe to take together</p>
+        <p className="text-muted-foreground">Auto-checks your active medicines and shows all interaction pairs</p>
       </div>
 
       <div className="mb-6 animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-foreground">Your Active Medicines</h2>
+          <button
+            type="button"
+            onClick={() => void handleCheckMyMedicines()}
+            disabled={loading || activeMedicineNames.length < 2}
+            className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            Recheck All
+          </button>
+        </div>
+        {activeMedicineNames.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No active medicines found. Add medicines first to enable automatic interaction checks.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {activeMedicineNames.map(name => (
+              <span key={name} className="rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">{name}</span>
+            ))}
+          </div>
+        )}
+        {activeMedicineNames.length === 1 && (
+          <p className="mt-3 text-xs text-muted-foreground">At least two active medicines are needed for interaction checks.</p>
+        )}
+      </div>
+
+      <div className="mb-6 animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Manual pair check</p>
         <form onSubmit={handleCheck} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>

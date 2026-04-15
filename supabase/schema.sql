@@ -23,6 +23,7 @@ create table if not exists medications (
   drug_name text not null,
   dosage text not null,
   photo_url text,
+  food_timing text not null default 'before-food' check (food_timing in ('before-food', 'after-food')),
   category text not null check (category in ('blood-pressure', 'diabetes', 'thyroid', 'antibiotic', 'blood-thinner', 'other')),
   criticality text not null check (criticality in ('low', 'medium', 'high')),
   schedule_time text not null,
@@ -31,6 +32,7 @@ create table if not exists medications (
 );
 
 alter table medications add column if not exists photo_url text;
+alter table medications add column if not exists food_timing text not null default 'before-food';
 
 create table if not exists logs (
   id uuid primary key default gen_random_uuid(),
