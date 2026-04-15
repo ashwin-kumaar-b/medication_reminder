@@ -1,15 +1,19 @@
 import { useState } from 'react';
 import { useMedicines } from '@/contexts/MedicineContext';
-import { HelpCircle, CheckCircle, AlertTriangle, XCircle, Clock } from 'lucide-react';
+import { HelpCircle, CheckCircle, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
+import { getGeminiMedicalAdvice } from '@/lib/medicationApis';
 
 const CanITake = () => {
   const { medicines, doseLogs } = useMedicines();
   const [selectedId, setSelectedId] = useState('');
+  const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ status: 'yes' | 'wait' | 'skip'; message: string } | null>(null);
 
-  const handleCheck = () => {
+  const handleCheck = async () => {
     const med = medicines.find(m => m.id === selectedId);
     if (!med) return;
+
+    setLoading(true);
 
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -28,10 +32,15 @@ const CanITake = () => {
 
     const minGap = med.frequency === 'daily' ? 20 : med.frequency === 'twice' ? 10 : 6;
 
+    let status: 'yes' | 'wait' | 'skip' = 'wait';
+    let baseMessage = '';
+
     if (hoursSinceLast < minGap) {
-      setResult({ status: 'skip', message: `You took ${med.name} ${Math.round(hoursSinceLast)} hours ago. Wait at least ${minGap} hours between doses to avoid double dosing.` });
+      status = 'skip';
+      baseMessage = `You took ${med.name} ${Math.round(hoursSinceLast)} hours ago. Wait at least ${minGap} hours between doses to avoid double dosing.`;
     } else if (inWindow) {
-      setResult({ status: 'yes', message: `✅ It's within your scheduled time window. You can safely take ${med.name} now.` });
+      status = 'yes';
+      baseMessage = `It's within your scheduled time window. You can take ${med.name} now.`;
     } else {
       const nextSlot = med.timeSlots.reduce((closest, slot) => {
         const [h, m] = slot.split(':').map(Number);
@@ -39,8 +48,27 @@ const CanITake = () => {
         const diff = mins - currentMinutes;
         return diff > 0 && diff < closest.diff ? { time: slot, diff } : closest;
       }, { time: med.timeSlots[0], diff: 9999 });
-      setResult({ status: 'wait', message: `⏰ Your next dose of ${med.name} is scheduled at ${nextSlot.time}. Wait until then for optimal timing.` });
+      status = 'wait';
+      baseMessage = `Your next dose of ${med.name} is scheduled at ${nextSlot.time}. Wait until then for optimal timing.`;
     }
+
+    const geminiAdvice = await getGeminiMedicalAdvice({
+      context: 'dose-advice',
+      medication: med.name,
+      evidence: [
+        `Calculated status: ${status}`,
+        `Hours since last dose: ${Math.round(hoursSinceLast)}`,
+        `Minimum safe gap: ${minGap} hours`,
+      ],
+    });
+
+    setResult({
+      status,
+      message: geminiAdvice
+        ? `${geminiAdvice.summary} ${geminiAdvice.explanation}`.trim()
+        : baseMessage,
+    });
+    setLoading(false);
   };
 
   const statusConfig = {
@@ -71,8 +99,8 @@ const CanITake = () => {
                 ))}
               </select>
             </div>
-            <button onClick={handleCheck} disabled={!selectedId} className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
-              <HelpCircle className="h-4 w-4" /> Check Now
+            <button onClick={() => void handleCheck()} disabled={!selectedId || loading} className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <HelpCircle className="h-4 w-4" />} Check Now
             </button>
           </div>
         )}
