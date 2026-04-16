@@ -421,6 +421,16 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
   const refreshMonitoring = async (patientId?: string) => {
     const now = new Date();
     const today = toDateKey(now);
+    const nowMs = Date.now();
+
+    let snoozeMeta: Record<string, { until: number; count: number; date: string }> = {};
+    try {
+      const raw = localStorage.getItem('mediguard_alarm_snooze_meta');
+      snoozeMeta = raw ? JSON.parse(raw) : {};
+    } catch {
+      snoozeMeta = {};
+    }
+
     const scoped = medications.filter(entry =>
       patientId ? entry.patientId === patientId : isPatientVisible(entry.patientId),
     );
@@ -455,7 +465,26 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       }
 
       if (lateMinutes >= 60 && (!currentLog || currentLog.status === 'pending' || currentLog.status === 'delayed')) {
+        const meta = snoozeMeta[medication.id];
+        const sameDayMeta = meta && meta.date === today ? meta : null;
+        const snoozeCount = sameDayMeta?.count || 0;
+        const snoozeUntil = sameDayMeta?.until || 0;
+
+        // First snooze gives grace; second snooze is treated as missed.
+        if (snoozeCount === 1 && nowMs <= snoozeUntil) {
+          continue;
+        }
+
+        if (snoozeCount === 1 && nowMs > snoozeUntil) {
+          continue;
+        }
+
         await upsertLog(medication, 'missed');
+
+        if (snoozeMeta[medication.id]) {
+          delete snoozeMeta[medication.id];
+          localStorage.setItem('mediguard_alarm_snooze_meta', JSON.stringify(snoozeMeta));
+        }
 
         await addNotification({
           patientId: medication.patientId,

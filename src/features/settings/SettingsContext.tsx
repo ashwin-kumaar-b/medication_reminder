@@ -1,7 +1,7 @@
 import { createContext, ReactNode, useContext, useMemo, useState } from 'react';
 import { AppLanguage, translations, TranslationKey } from '@/features/settings/translations';
 
-export type NotificationSound = 'classic' | 'soft' | 'urgent';
+export type NotificationSound = 'classic' | 'soft' | 'urgent' | 'cherie';
 
 export interface AppSettings {
   language: AppLanguage;

@@ -16,6 +16,15 @@ const Dashboard = () => {
   const [statsRange, setStatsRange] = useState<'daily' | 'weekly'>('daily');
   const [alarmVisible, setAlarmVisible] = useState(false);
   const [alarmItemIds, setAlarmItemIds] = useState<string[]>([]);
+  const [manualAlarmMode, setManualAlarmMode] = useState(false);
+  const [snoozeMeta, setSnoozeMeta] = useState<Record<string, { until: number; count: number; date: string }>>(() => {
+    try {
+      const raw = localStorage.getItem('mediguard_alarm_snooze_meta');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
   const [snoozedUntil, setSnoozedUntil] = useState<Record<string, number>>(() => {
     try {
       const raw = localStorage.getItem('mediguard_alarm_snooze');
@@ -26,6 +35,7 @@ const Dashboard = () => {
   });
   const alarmTimerRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const alarmAudioRef = useRef<HTMLAudioElement | null>(null);
   const lastNotifiedRef = useRef<string>('');
   const [patientForm, setPatientForm] = useState({
     name: '',
@@ -98,6 +108,16 @@ const Dashboard = () => {
   ];
 
   const playBeep = () => {
+    if (settings.notificationSound === 'cherie') {
+      if (!alarmAudioRef.current) {
+        alarmAudioRef.current = new Audio('/sounds/cherie-reminder.mp3');
+      }
+      alarmAudioRef.current.volume = settings.notificationVolume;
+      alarmAudioRef.current.currentTime = 0;
+      void alarmAudioRef.current.play();
+      return;
+    }
+
     try {
       if (!audioContextRef.current) {
         audioContextRef.current = new window.AudioContext();
@@ -135,6 +155,11 @@ const Dashboard = () => {
       window.clearInterval(alarmTimerRef.current);
       alarmTimerRef.current = null;
     }
+
+    if (alarmAudioRef.current) {
+      alarmAudioRef.current.pause();
+      alarmAudioRef.current.currentTime = 0;
+    }
   };
 
   const startAlarm = () => {
@@ -142,17 +167,44 @@ const Dashboard = () => {
     playBeep();
     alarmTimerRef.current = window.setInterval(() => {
       playBeep();
-    }, settings.notificationSound === 'urgent' ? 800 : 1300);
+    }, settings.notificationSound === 'urgent' ? 800 : settings.notificationSound === 'cherie' ? 7000 : 1300);
   };
 
   const closeAlarm = () => {
     stopAlarm();
     setAlarmVisible(false);
     setAlarmItemIds([]);
+    setManualAlarmMode(false);
+  };
+
+  const clearSnoozeForMedication = (medicationId: string) => {
+    setSnoozedUntil(prev => {
+      const next = { ...prev };
+      delete next[medicationId];
+      return next;
+    });
+    setSnoozeMeta(prev => {
+      const next = { ...prev };
+      delete next[medicationId];
+      return next;
+    });
+  };
+
+  const handleTestReminder = () => {
+    if (!nextDoseGroup || nextDoseGroup.items.length === 0) {
+      toast({ title: 'No medicine to test', description: 'Add at least one pending medicine to preview reminder overlay.' });
+      return;
+    }
+
+    setManualAlarmMode(true);
+    setAlarmItemIds(nextDoseGroup.items.map(item => item.medication.id));
+    setAlarmVisible(true);
+    startAlarm();
   };
 
   const handleTakeFromAlarm = async (medicationId: string) => {
     await markDoseStatus(medicationId, 'taken');
+    clearSnoozeForMedication(medicationId);
     setAlarmItemIds(prev => {
       const next = prev.filter(id => id !== medicationId);
       if (next.length === 0) {
@@ -165,11 +217,14 @@ const Dashboard = () => {
 
   const handleTakeFromCard = async (medicationId: string) => {
     await markDoseStatus(medicationId, 'taken');
+    clearSnoozeForMedication(medicationId);
     toast({ title: 'Dose marked as taken', description: 'Medicine status updated.' });
   };
 
   const handleSnoozeFiveMinutes = () => {
     const until = Date.now() + 5 * 60 * 1000;
+    const dateKey = new Date().toISOString().slice(0, 10);
+
     setSnoozedUntil(prev => {
       const next = { ...prev };
       alarmItemIds.forEach(id => {
@@ -177,6 +232,21 @@ const Dashboard = () => {
       });
       return next;
     });
+
+    setSnoozeMeta(prev => {
+      const next = { ...prev };
+      alarmItemIds.forEach(id => {
+        const existing = next[id];
+        const previousCount = existing?.date === dateKey ? existing.count : 0;
+        next[id] = {
+          until,
+          count: previousCount + 1,
+          date: dateKey,
+        };
+      });
+      return next;
+    });
+
     closeAlarm();
     toast({ title: 'Snoozed', description: 'We will remind you again in 5 minutes.' });
   };
@@ -211,8 +281,12 @@ const Dashboard = () => {
   }, [snoozedUntil]);
 
   useEffect(() => {
+    localStorage.setItem('mediguard_alarm_snooze_meta', JSON.stringify(snoozeMeta));
+  }, [snoozeMeta]);
+
+  useEffect(() => {
     if (!nextDoseGroup || !nextDoseGroup.isOverdue) {
-      if (alarmVisible) closeAlarm();
+      if (alarmVisible && !manualAlarmMode) closeAlarm();
       return;
     }
 
@@ -224,6 +298,7 @@ const Dashboard = () => {
     }
 
     const fingerprint = dueItems.map(item => item.medication.id).sort().join('|');
+    setManualAlarmMode(false);
     setAlarmItemIds(dueItems.map(item => item.medication.id));
     setAlarmVisible(true);
     startAlarm();
@@ -238,7 +313,7 @@ const Dashboard = () => {
     if ('Notification' in window && Notification.permission === 'default') {
       void Notification.requestPermission();
     }
-  }, [nextDoseGroup, snoozedUntil]);
+  }, [nextDoseGroup, snoozedUntil, manualAlarmMode]);
 
   useEffect(() => {
     return () => {
@@ -440,11 +515,22 @@ const Dashboard = () => {
           <h2 className="text-lg font-semibold text-foreground">
             {nextDoseGroup?.items.length && nextDoseGroup.items.length > 1 ? 'Next Medicines to Take' : 'Next Medicine to Take'}
           </h2>
-          {nextDoseGroup && (
-            <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground">
-              {nextDoseGroup.time}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {nextDoseGroup && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleTestReminder}
+                  className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-foreground hover:bg-muted"
+                >
+                  Test Reminder
+                </button>
+                <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground">
+                  {nextDoseGroup.time}
+                </span>
+              </>
+            )}
+          </div>
         </div>
 
         {!nextDoseGroup ? (
