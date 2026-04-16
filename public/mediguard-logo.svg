@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="MediGuard logo">
+  <rect x="80" y="28" width="96" height="200" rx="26" fill="#ef4444" />
+  <rect x="28" y="80" width="200" height="96" rx="26" fill="#ef4444" />
+  <path
+    d="M34 129h58l14-34 18 64 16-53 11 23h71"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="10"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
