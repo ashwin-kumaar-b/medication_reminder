@@ -13,6 +13,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  phoneNumber?: string;
   password?: string;
   role: UserRole;
   age?: number;
@@ -30,7 +31,7 @@ export interface User {
 
 interface RegisterInput {
   name: string;
-  email: string;
+  phoneNumber: string;
   password: string;
   role: UserRole;
   age?: number;
@@ -56,9 +57,8 @@ interface CreatePatientInput {
 }
 
 interface LoginInput {
-  email: string;
+  phoneNumber: string;
   password: string;
-  role?: UserRole;
 }
 
 interface AuthResult {
@@ -83,6 +83,24 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const normalizePhoneNumber = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('+')) {
+    return `+${trimmed.slice(1).replace(/\D/g, '')}`;
+  }
+  return `+${trimmed.replace(/\D/g, '')}`;
+};
+
+const buildAuthEmailFromPhone = (phoneNumber: string) => `phone_${phoneNumber.replace('+', '')}@mediguard.local`;
+
+const extractPhoneNumberFromAuthEmail = (email?: string) => {
+  if (!email) return undefined;
+  const matched = email.match(/^phone_(\d+)@mediguard\.local$/i);
+  if (!matched) return undefined;
+  return `+${matched[1]}`;
+};
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) throw new Error('useAuth must be used within AuthProvider');
@@ -98,6 +116,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       id: crypto.randomUUID(),
       name: 'Demo Patient',
       email: 'patient@mediguard.demo',
+      phoneNumber: '+919999000001',
       password: 'demo1234',
       role: 'patient',
       age: 58,
@@ -115,6 +134,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       id: crypto.randomUUID(),
       name: 'Demo Caretaker',
       email: 'caretaker@mediguard.demo',
+      phoneNumber: '+919999000002',
       password: 'demo1234',
       role: 'caretaker',
       age: 31,
@@ -190,6 +210,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       id: row.id,
       name: row.name,
       email: row.email,
+      phoneNumber:
+        (typeof profile.phoneNumber === 'string' ? normalizePhoneNumber(profile.phoneNumber) : undefined) ||
+        extractPhoneNumberFromAuthEmail(row.email),
       password: row.password || undefined,
       role: row.role,
       age: typeof row.age === 'number' ? row.age : ageFromDob,
@@ -239,6 +262,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     ui_mode: entry.uiMode,
     linked_patient_id: entry.linkedPatientId ?? null,
     profile_json: {
+      phoneNumber: entry.phoneNumber ?? null,
       dateOfBirth: entry.dateOfBirth ?? null,
       heightCm: entry.heightCm ?? null,
       weightKg: entry.weightKg ?? null,
@@ -327,13 +351,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const register = async (input: RegisterInput) => {
-    const normalizedEmail = input.email.trim().toLowerCase();
-    if (!input.name.trim() || !normalizedEmail || !input.password.trim()) {
+    const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+    const authEmail = buildAuthEmailFromPhone(normalizedPhoneNumber);
+
+    if (!input.name.trim() || !normalizedPhoneNumber || !input.password.trim()) {
       return { ok: false, error: 'Please fill all required fields.' };
     }
 
-    if (users.some(existing => existing.email.toLowerCase() === normalizedEmail)) {
-      return { ok: false, error: 'Email already registered.' };
+    if (!/^\+\d{10,15}$/.test(normalizedPhoneNumber)) {
+      return { ok: false, error: 'Please enter a valid mobile number with country code.' };
+    }
+
+    if (
+      users.some(existing => {
+        const existingPhone = normalizePhoneNumber(existing.phoneNumber || extractPhoneNumberFromAuthEmail(existing.email) || '');
+        return existingPhone === normalizedPhoneNumber || existing.email.toLowerCase() === authEmail;
+      })
+    ) {
+      return { ok: false, error: 'Mobile number already registered.' };
     }
 
     if (input.role === 'caretaker' && input.linkedPatientId?.trim()) {
@@ -353,20 +388,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       input.illness?.trim() || normalizedChronicDiseases.find(item => item !== 'None') || undefined;
 
     if (isSupabaseConfigured && supabase) {
-      const signupRes = await supabase.auth.signUp({
-        email: normalizedEmail,
-        password: input.password,
-      });
-
-      if (signupRes.error || !signupRes.data.user) {
-        return { ok: false, error: signupRes.error?.message || 'Unable to create account.' };
-      }
-
-      const authUser = signupRes.data.user;
       const newUser: User = {
-        id: authUser.id,
+        id: crypto.randomUUID(),
         name: input.name.trim(),
-        email: normalizedEmail,
+        email: authEmail,
+        phoneNumber: normalizedPhoneNumber,
+        password: input.password,
         role: input.role,
         age: resolvedAge,
         illness: resolvedIllness,
@@ -385,7 +412,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUsers(nextUsers);
       localStorage.setItem('mediguard_users', JSON.stringify(nextUsers));
 
-      const profileSaveError = await upsertUserRow(newUser, '__supabase_auth__');
+      const profileSaveError = await upsertUserRow(newUser, input.password);
       if (profileSaveError) {
         return {
           ok: false,
@@ -407,14 +434,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         );
       }
 
-      if (!signupRes.data.session) {
-        return {
-          ok: true,
-          user: newUser,
-          needsEmailVerification: true,
-        };
-      }
-
       persistUserSession(newUser);
       return { ok: true, user: newUser };
     }
@@ -422,7 +441,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const newUser: User = {
       id: crypto.randomUUID(),
       name: input.name.trim(),
-      email: normalizedEmail,
+      email: authEmail,
+      phoneNumber: normalizedPhoneNumber,
       password: input.password,
       role: input.role,
       age: resolvedAge,
@@ -501,59 +521,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const login = async (input: LoginInput) => {
-    const normalizedEmail = input.email.trim().toLowerCase();
+    const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+    const authEmail = buildAuthEmailFromPhone(normalizedPhoneNumber);
+
+    if (!/^\+\d{10,15}$/.test(normalizedPhoneNumber)) {
+      return { ok: false, error: 'Please enter a valid mobile number with country code.' };
+    }
 
     if (isSupabaseConfigured && supabase) {
-      const signInRes = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password: input.password,
-      });
+      const { data: profile, error } = await supabase.from('users').select('*').eq('email', authEmail).maybeSingle();
 
-      if (signInRes.error || !signInRes.data.user) {
-        return { ok: false, error: signInRes.error?.message || 'Invalid credentials.' };
+      if (error) {
+        return { ok: false, error: error.message || 'Unable to log in. Please try again.' };
       }
 
-      const authUser = signInRes.data.user;
-      const { data: profile } = await supabase.from('users').select('*').eq('id', authUser.id).maybeSingle();
-
-      const userProfile: User = profile
-        ? mapUserRow(profile)
-        : {
-            id: authUser.id,
-            name: (authUser.user_metadata?.name as string | undefined) || normalizedEmail.split('@')[0],
-            email: normalizedEmail,
-            role: ((authUser.user_metadata?.role as UserRole | undefined) || 'patient'),
-            age: typeof authUser.user_metadata?.age === 'number' ? authUser.user_metadata.age : undefined,
-            illness: authUser.user_metadata?.illness as string | undefined,
-            dateOfBirth: authUser.user_metadata?.date_of_birth as string | undefined,
-            heightCm: authUser.user_metadata?.height_cm as number | undefined,
-            weightKg: authUser.user_metadata?.weight_kg as number | undefined,
-            chronicDiseases: normalizeStringArray(authUser.user_metadata?.chronic_diseases),
-            infectionHistory: normalizeStringArray(authUser.user_metadata?.infection_history),
-            allergies: normalizeAllergies(authUser.user_metadata?.allergies),
-            emergencyContactEmail: authUser.user_metadata?.emergency_contact_email as string | undefined,
-            uiMode: ((authUser.user_metadata?.ui_mode as UiMode | undefined) || 'younger'),
-          };
-
-      if (!profile) {
-        const profileSaveError = await upsertUserRow(userProfile, '__supabase_auth__');
-        if (profileSaveError) {
-          return {
-            ok: false,
-            error:
-              `Logged in but profile sync failed: ${profileSaveError}. ` +
-              'Please run supabase/schema.sql in your Supabase SQL editor and retry.',
-          };
-        }
+      if (!profile || profile.password !== input.password) {
+        return { ok: false, error: 'Mobile number is not registered or password is incorrect.' };
       }
 
-      if (input.role && input.role !== userProfile.role) {
-        await supabase.auth.signOut();
-        return {
-          ok: false,
-          error: `Role mismatch. This account is registered as ${userProfile.role}.`,
-        };
-      }
+      const userProfile = mapUserRow(profile);
 
       persistUserSession(userProfile);
       await loadUsersFromSupabase();
@@ -562,13 +548,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const matched = users.find(
       existing =>
-        existing.email.toLowerCase() === normalizedEmail &&
-        existing.password === input.password &&
-        (!input.role || existing.role === input.role),
+        (normalizePhoneNumber(existing.phoneNumber || extractPhoneNumberFromAuthEmail(existing.email) || '') ===
+          normalizedPhoneNumber ||
+          existing.email.toLowerCase() === authEmail) &&
+        existing.password === input.password,
     );
 
     if (!matched) {
-      return { ok: false, error: 'Invalid credentials or role selection.' };
+      return { ok: false, error: 'Mobile number is not registered or password is incorrect.' };
     }
 
     persistUserSession(matched);
