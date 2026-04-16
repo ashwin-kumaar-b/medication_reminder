@@ -134,15 +134,19 @@ export interface FoodNutritionProfileInput {
 
 export interface FoodNutritionProfileInsight {
   summary: string;
+  confidence: 'high' | 'medium' | 'low';
+  evidenceBasis: string[];
   foodTypesToPrioritize: Array<{
     type: string;
     reason: string;
     examples: string[];
+    confidence: 'high' | 'medium' | 'low';
   }>;
   foodTypesToLimit: Array<{
     type: string;
     reason: string;
     examples: string[];
+    confidence: 'high' | 'medium' | 'low';
   }>;
   timingTips: string[];
   source: 'Groq';
@@ -941,20 +945,49 @@ export const getFoodNutritionProfileInsight = async (
   const infectionHistory = (input.infectionHistory || []).map(item => clean(item)).filter(Boolean);
   const allergies = (input.allergies || []).map(item => clean(item)).filter(Boolean);
 
+  const confidenceFromValue = (value: unknown): 'high' | 'medium' | 'low' => {
+    const normalized = clean(String(value || '')).toLowerCase();
+    if (normalized === 'high') return 'high';
+    if (normalized === 'medium' || normalized === 'moderate') return 'medium';
+    return 'low';
+  };
+
+  const evidenceSources = await Promise.all(
+    input.medicines.slice(0, 6).map(async medName => {
+      const safety = await getOpenFdaSafety(medName);
+      const lines = safety
+        ? [...(safety.foodInteractions || []), ...(safety.warnings || []), ...(safety.contraindications || [])]
+            .map(item => clean(item))
+            .filter(Boolean)
+            .slice(0, 2)
+        : [];
+
+      return {
+        medName,
+        lines,
+      };
+    }),
+  );
+
+  const evidenceLines = evidenceSources.flatMap(item => item.lines.map(line => `${item.medName}: ${line}`)).slice(0, 10);
+
   const prompt = [
     'You are a medication-aware clinical nutrition assistant.',
     'Task: provide practical food-type recommendations based on current medicines and disease profile.',
     'Focus on food categories and nutrition strategy (for example: complex carbohydrates, fiber, vitamin E-rich foods, potassium-rich foods, protein quality, hydration).',
     'Avoid fabricated contraindications. If uncertain, state uncertainty conservatively.',
+    'Only claim direct medicine-food interaction if supported by OpenFDA evidence lines.',
+    'If evidence for direct interaction is weak, provide general disease-supportive nutrition advice and set confidence to low or medium.',
     'Do not prescribe drug dose changes. Keep medication names in English.',
     `Write summary, reasons, and timing tips in ${outputLanguage}.`,
     'Return strict JSON only with this exact shape:',
-    '{"summary":"...","foodTypesToPrioritize":[{"type":"...","reason":"...","examples":["..."]}],"foodTypesToLimit":[{"type":"...","reason":"...","examples":["..."]}],"timingTips":["..."]}',
+    '{"summary":"...","confidence":"high|medium|low","evidenceBasis":["..."],"foodTypesToPrioritize":[{"type":"...","reason":"...","examples":["..."],"confidence":"high|medium|low"}],"foodTypesToLimit":[{"type":"...","reason":"...","examples":["..."],"confidence":"high|medium|low"}],"timingTips":["..."]}',
     `Current medicines: ${input.medicines.join(', ')}`,
     `Illness: ${illnesses.join(', ') || 'None specified'}`,
     `Chronic diseases: ${chronicDiseases.join(', ') || 'None specified'}`,
     `Infection history: ${infectionHistory.join(', ') || 'None specified'}`,
     `Allergies: ${allergies.join(', ') || 'None specified'}`,
+    `OpenFDA evidence lines: ${evidenceLines.length > 0 ? evidenceLines.join(' | ') : 'None available'}`,
   ].join('\n');
 
   try {
@@ -988,6 +1021,7 @@ export const getFoodNutritionProfileInsight = async (
       examples: Array.isArray(item?.examples)
         ? item.examples.map((example: string) => clean(example)).filter(Boolean).slice(0, 5)
         : [],
+      confidence: confidenceFromValue(item?.confidence),
     });
 
     const prioritize = Array.isArray(parsed.foodTypesToPrioritize)
@@ -1004,6 +1038,10 @@ export const getFoodNutritionProfileInsight = async (
 
     return {
       summary: clean(parsed.summary) || 'Medication and profile-based diet pattern can support safer long-term control.',
+      confidence: confidenceFromValue(parsed.confidence),
+      evidenceBasis: Array.isArray(parsed.evidenceBasis)
+        ? parsed.evidenceBasis.map((item: string) => clean(item)).filter(Boolean).slice(0, 5)
+        : evidenceLines.slice(0, 3),
       foodTypesToPrioritize: prioritize,
       foodTypesToLimit: limit,
       timingTips,

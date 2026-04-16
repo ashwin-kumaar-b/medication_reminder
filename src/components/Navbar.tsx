@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Shield, LayoutDashboard, Pill, GitCompareArrows, Apple, Menu, X, LogOut, PlusCircle, Timer, AlertOctagon, Settings as SettingsIcon } from 'lucide-react';
+import { Shield, LayoutDashboard, Pill, GitCompareArrows, Apple, Menu, X, LogOut, PlusCircle, AlertOctagon, Settings as SettingsIcon } from 'lucide-react';
 import { useAuth, UserRole } from '@/contexts/AuthContext';
 import { useMemo, useState } from 'react';
 import { useAppSettings } from '@/features/settings/SettingsContext';
@@ -12,7 +12,6 @@ const navByRole: Record<UserRole, Array<{ to: string; labelKey: TranslationKey; 
     { to: '/medicines', labelKey: 'nav.medicines', icon: Pill },
     { to: '/interaction-checker', labelKey: 'nav.interactions', icon: GitCompareArrows },
     { to: '/food-check', labelKey: 'nav.foodCheck', icon: Apple },
-    { to: '/can-i-take', labelKey: 'nav.canITake', icon: Timer },
     { to: '/missed-doses', labelKey: 'nav.missedDoses', icon: AlertOctagon },
     { to: '/settings', labelKey: 'nav.settings', icon: SettingsIcon },
   ],

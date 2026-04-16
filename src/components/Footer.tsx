@@ -13,7 +13,6 @@ const Footer = () => {
       ]
     : [
         { to: '/dashboard', label: 'Patient Dashboard' },
-        { to: '/can-i-take', label: 'Can I Take' },
         { to: '/missed-doses', label: 'Missed Dose Analyzer' },
       ];
 

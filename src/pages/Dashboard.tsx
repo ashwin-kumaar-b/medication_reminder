@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, UiMode } from '@/contexts/AuthContext';
 import { useMedicines } from '@/contexts/MedicineContext';
-import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, HelpCircle, XCircle, BellRing } from 'lucide-react';
+import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, XCircle, BellRing } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { getMissedDoseSeverityInsight, MissedDoseSeverityInsight } from '@/lib/medicationApis';
@@ -107,7 +107,6 @@ const Dashboard = () => {
   const actions = [
     { to: '/add-medicine', label: t('actions.addMedicine'), icon: Plus, desc: t('actions.addMedicineDesc') },
     { to: '/interaction-checker', label: t('actions.checkInteractions'), icon: GitCompareArrows, desc: t('actions.checkInteractionsDesc') },
-    { to: '/can-i-take', label: t('actions.canITakeNow'), icon: HelpCircle, desc: t('actions.canITakeNowDesc') },
   ];
 
   const missedMedicationRows = useMemo(() => {
