@@ -6,6 +6,9 @@ create table if not exists users (
   email text not null unique,
   password text not null,
   role text not null check (role in ('patient', 'caretaker')),
+  gender text,
+  gender_other text,
+  blood_group text,
   age integer,
   illness text,
   date_of_birth date,
@@ -23,6 +26,9 @@ create table if not exists users (
 
 alter table users add column if not exists age integer;
 alter table users add column if not exists illness text;
+alter table users add column if not exists gender text;
+alter table users add column if not exists gender_other text;
+alter table users add column if not exists blood_group text;
 alter table users add column if not exists date_of_birth date;
 alter table users add column if not exists height_cm integer;
 alter table users add column if not exists weight_kg numeric(6,2);
@@ -122,6 +128,9 @@ create table if not exists caretaker_patients (
 
 create table if not exists user_health_profiles (
   user_id uuid primary key references users(id) on delete cascade,
+  gender text,
+  gender_other text,
+  blood_group text,
   date_of_birth date,
   height_cm integer,
   weight_kg numeric(6,2),
@@ -137,9 +146,16 @@ create table if not exists user_health_profiles (
 create index if not exists idx_user_health_profiles_emergency_email
   on user_health_profiles (emergency_contact_email);
 
+alter table user_health_profiles add column if not exists gender text;
+alter table user_health_profiles add column if not exists gender_other text;
+alter table user_health_profiles add column if not exists blood_group text;
+
 -- Backfill any already stored health details from users into the new table.
 insert into user_health_profiles (
   user_id,
+  gender,
+  gender_other,
+  blood_group,
   date_of_birth,
   height_cm,
   weight_kg,
@@ -151,6 +167,9 @@ insert into user_health_profiles (
 )
 select
   id,
+  gender,
+  gender_other,
+  blood_group,
   date_of_birth,
   height_cm,
   weight_kg,
@@ -161,6 +180,9 @@ select
   coalesce(profile_json, '{}'::jsonb)
 from users
 on conflict (user_id) do update set
+  gender = excluded.gender,
+  gender_other = excluded.gender_other,
+  blood_group = excluded.blood_group,
   date_of_birth = excluded.date_of_birth,
   height_cm = excluded.height_cm,
   weight_kg = excluded.weight_kg,
