@@ -15,7 +15,6 @@ import EditMedicine from "@/pages/EditMedicine";
 import Medicines from "@/pages/Medicines";
 import InteractionChecker from "@/pages/InteractionChecker";
 import FoodCheck from "@/pages/FoodCheck";
-import CanITake from "@/pages/CanITake";
 import MissedDoses from "@/pages/MissedDoses";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
@@ -56,7 +55,6 @@ const App = () => (
                           <Route path="/medicines" element={<ProtectedRoute><Medicines /></ProtectedRoute>} />
                           <Route path="/interaction-checker" element={<ProtectedRoute><InteractionChecker /></ProtectedRoute>} />
                           <Route path="/food-check" element={<ProtectedRoute><FoodCheck /></ProtectedRoute>} />
-                          <Route path="/can-i-take" element={<ProtectedRoute allowRoles={['patient']}><CanITake /></ProtectedRoute>} />
                           <Route path="/missed-doses" element={<ProtectedRoute allowRoles={['patient']}><MissedDoses /></ProtectedRoute>} />
                           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
                           <Route path="*" element={<NotFound />} />

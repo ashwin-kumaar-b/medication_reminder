@@ -231,6 +231,17 @@ const FoodCheck = () => {
           <div className="mb-2 flex items-center gap-2">
             <Apple className="h-5 w-5 text-primary" />
             <h2 className="text-base font-semibold text-foreground">Medication + Disease Nutrition Guidance</h2>
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${
+                nutritionInsight.confidence === 'high'
+                  ? 'bg-success/20 text-success'
+                  : nutritionInsight.confidence === 'medium'
+                    ? 'bg-warning/20 text-warning'
+                    : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {nutritionInsight.confidence} confidence
+            </span>
           </div>
           <p className="mb-4 text-sm text-foreground/90">{nutritionInsight.summary}</p>
 
@@ -240,7 +251,7 @@ const FoodCheck = () => {
               <ul className="space-y-2 text-sm text-foreground/90">
                 {nutritionInsight.foodTypesToPrioritize.slice(0, 4).map((item, index) => (
                   <li key={`${item.type}-${index}`}>
-                    <p className="font-semibold">{item.type}</p>
+                    <p className="font-semibold">{item.type} <span className="text-xs font-medium opacity-70">({item.confidence})</span></p>
                     <p>{item.reason}</p>
                     {item.examples.length > 0 && <p className="text-xs opacity-80">Examples: {item.examples.join(', ')}</p>}
                   </li>
@@ -253,7 +264,7 @@ const FoodCheck = () => {
               <ul className="space-y-2 text-sm text-foreground/90">
                 {nutritionInsight.foodTypesToLimit.slice(0, 4).map((item, index) => (
                   <li key={`${item.type}-${index}`}>
-                    <p className="font-semibold">{item.type}</p>
+                    <p className="font-semibold">{item.type} <span className="text-xs font-medium opacity-70">({item.confidence})</span></p>
                     <p>{item.reason}</p>
                     {item.examples.length > 0 && <p className="text-xs opacity-80">Examples: {item.examples.join(', ')}</p>}
                   </li>
@@ -261,6 +272,17 @@ const FoodCheck = () => {
               </ul>
             </div>
           </div>
+
+          {nutritionInsight.evidenceBasis.length > 0 && (
+            <div className="mt-4 rounded-lg border border-border bg-background p-3">
+              <p className="mb-2 text-sm font-semibold text-foreground">Evidence basis</p>
+              <ul className="space-y-1 text-xs text-foreground/85">
+                {nutritionInsight.evidenceBasis.slice(0, 4).map((line, index) => (
+                  <li key={`${line}-${index}`}>- {line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {nutritionInsight.timingTips.length > 0 && (
             <div className="mt-4 rounded-lg border border-border bg-background p-3">
