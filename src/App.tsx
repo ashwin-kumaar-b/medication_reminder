@@ -31,26 +31,42 @@ const App = () => (
           <TooltipProvider>
             <Toaster />
             <BrowserRouter>
-              <div className="flex min-h-screen flex-col">
-                <Navbar />
-                <main className="flex-1">
-                  <Routes>
-                    <Route path="/" element={<Landing />} />
-                    <Route path="/auth" element={<Auth />} />
-                    <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-                    <Route path="/add-medicine" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><AddMedicine /></ProtectedRoute>} />
-                    <Route path="/edit-medicine/:id" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><EditMedicine /></ProtectedRoute>} />
-                    <Route path="/medicines" element={<ProtectedRoute><Medicines /></ProtectedRoute>} />
-                    <Route path="/interaction-checker" element={<ProtectedRoute><InteractionChecker /></ProtectedRoute>} />
-                    <Route path="/food-check" element={<ProtectedRoute><FoodCheck /></ProtectedRoute>} />
-                    <Route path="/can-i-take" element={<ProtectedRoute allowRoles={['patient']}><CanITake /></ProtectedRoute>} />
-                    <Route path="/missed-doses" element={<ProtectedRoute allowRoles={['patient']}><MissedDoses /></ProtectedRoute>} />
-                    <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </main>
-                <Footer />
-              </div>
+
+              {/* Only show Navbar and Footer if not on /auth route */}
+              <Routes>
+                <Route
+                  path="/auth"
+                  element={
+                    <main className="flex-1">
+                      <Auth />
+                    </main>
+                  }
+                />
+                <Route
+                  path="*"
+                  element={
+                    <div className="flex min-h-screen flex-col">
+                      <Navbar />
+                      <main className="flex-1">
+                        <Routes>
+                          <Route path="/" element={<Landing />} />
+                          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                          <Route path="/add-medicine" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><AddMedicine /></ProtectedRoute>} />
+                          <Route path="/edit-medicine/:id" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><EditMedicine /></ProtectedRoute>} />
+                          <Route path="/medicines" element={<ProtectedRoute><Medicines /></ProtectedRoute>} />
+                          <Route path="/interaction-checker" element={<ProtectedRoute><InteractionChecker /></ProtectedRoute>} />
+                          <Route path="/food-check" element={<ProtectedRoute><FoodCheck /></ProtectedRoute>} />
+                          <Route path="/can-i-take" element={<ProtectedRoute allowRoles={['patient']}><CanITake /></ProtectedRoute>} />
+                          <Route path="/missed-doses" element={<ProtectedRoute allowRoles={['patient']}><MissedDoses /></ProtectedRoute>} />
+                          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                          <Route path="*" element={<NotFound />} />
+                        </Routes>
+                      </main>
+                      <Footer />
+                    </div>
+                  }
+                />
+              </Routes>
             </BrowserRouter>
           </TooltipProvider>
         </MedicineProvider>

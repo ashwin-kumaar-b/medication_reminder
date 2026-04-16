@@ -9,6 +9,7 @@ const ALLOWED_RXNAV_TTYS = new Set(['IN', 'PIN', 'MIN', 'SCD', 'SBD', 'SCDC', 'S
 export interface DrugSuggestion {
   name: string;
   rxcui: string;
+  type?: 'brand' | 'generic';
 }
 
 export interface RxNavInteraction {
@@ -173,12 +174,15 @@ export const searchRxNavSuggestions = async (term: string): Promise<DrugSuggesti
       return;
     }
 
+    const suggestionType: DrugSuggestion['type'] =
+      group?.tty === 'SBD' || group?.tty === 'SBDC' ? 'brand' : 'generic';
+
     const concepts = group?.conceptProperties || [];
     concepts.forEach((concept: any) => {
       if (!concept?.name || !concept?.rxcui) return;
       const normalizedName = normalizeDrugName(concept.name);
       if (!normalizedName || isNoisySuggestion(normalizedName)) return;
-      suggestions.push({ name: normalizedName, rxcui: concept.rxcui });
+      suggestions.push({ name: normalizedName, rxcui: concept.rxcui, type: suggestionType });
     });
   });
 
