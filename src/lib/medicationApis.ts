@@ -53,6 +53,76 @@ interface GeminiMedicalInput {
   evidence?: string[];
 }
 
+export interface MissedDoseSeverityInput {
+  patientAge?: number;
+  condition?: string;
+  language?: 'en' | 'es' | 'fr' | 'ta' | 'te' | 'hi';
+  missed: Array<{
+    drugName: string;
+    category: string;
+    criticality: string;
+    missedCount: number;
+    lastMissedDate: string;
+  }>;
+}
+
+export interface MissedDoseSeverityInsight {
+  severity: 'high' | 'moderate' | 'low';
+  summary: string;
+  guidance: string;
+  riskProgression: string;
+  missesUntilWorse: number | null;
+  source: 'Groq';
+}
+
+export interface MissedDoseRecoveryInput {
+  language?: 'en' | 'es' | 'fr' | 'ta' | 'te' | 'hi';
+  nowIso?: string;
+  medication: {
+    drugName: string;
+    dosage: string;
+    category: string;
+    criticality: string;
+    frequency: string;
+    foodTiming: 'before-food' | 'after-food' | 'unknown';
+    scheduledTime: string;
+    missedScheduledAt: string;
+    missedCountForMedication: number;
+    missedCountRecentWindow: number;
+  };
+}
+
+export interface MissedDoseRecoveryAdvice {
+  action: 'take-full-dose-now' | 'take-half-dose-now' | 'skip-and-resume-next' | 'contact-clinician-now';
+  urgency: 'high' | 'moderate' | 'low';
+  technicalRationale: string;
+  foodTimingInstruction: string;
+  monitoringNotes: string[];
+  confidence: 'high' | 'medium' | 'low';
+  source: 'Groq';
+}
+
+export interface DrugAllergyProfileInput {
+  language?: 'en' | 'es' | 'fr' | 'ta' | 'te' | 'hi';
+  medicines: string[];
+  chronicDiseases?: string[];
+  infectionHistory?: string[];
+  allergies?: Array<{ category: string; trigger?: string }>;
+}
+
+export interface DrugAllergyProfileInsight {
+  overallRisk: 'high' | 'moderate' | 'low' | 'none';
+  summary: string;
+  findings: Array<{
+    severity: 'high' | 'moderate' | 'low';
+    title: string;
+    detail: string;
+    evidence: string;
+  }>;
+  recommendations: string[];
+  source: 'Groq';
+}
+
 const clean = (value?: string) => (value || '').replace(/\s+/g, ' ').trim();
 
 const splitCsv = (value?: string) =>
@@ -98,6 +168,42 @@ const normalizeSeverity = (value?: string): 'high' | 'moderate' | 'low' => {
   if (normalized.includes('high') || normalized.includes('major') || normalized.includes('severe')) return 'high';
   if (normalized.includes('moderate') || normalized.includes('medium')) return 'moderate';
   return 'low';
+};
+
+const buildEvidenceTokenSet = (evidence: string[]) => {
+  const tokens = new Set<string>();
+  const joined = evidence.join(' ').toLowerCase();
+  const raw = joined.match(/[a-z][a-z0-9-]{3,}/g) || [];
+  raw.forEach(token => tokens.add(token));
+  return tokens;
+};
+
+const isGenericSafetyLine = (text: string) => {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes('consult') ||
+    lower.includes('healthcare provider') ||
+    lower.includes('pharmacist') ||
+    lower.includes('monitor') ||
+    lower.includes('seek medical')
+  );
+};
+
+const hasEvidenceOverlap = (text: string, evidenceTokens: Set<string>) => {
+  if (!text) return false;
+  if (isGenericSafetyLine(text)) return true;
+
+  const tokens = (text.toLowerCase().match(/[a-z][a-z0-9-]{3,}/g) || []).filter(token => !['risk', 'dose', 'drug', 'drugs', 'interaction'].includes(token));
+  if (tokens.length === 0) return false;
+
+  let matches = 0;
+  for (const token of tokens) {
+    if (evidenceTokens.has(token)) {
+      matches += 1;
+      if (matches >= 2) return true;
+    }
+  }
+  return false;
 };
 
 const buildDdinterUrl = (drugA: string, drugB: string) => {
@@ -360,11 +466,15 @@ export const inferFoodRiskFromOpenFda = (safety: OpenFdaSafety | null, foodQuery
 };
 
 export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise<GeminiMedicalAdvice | null> => {
+  const evidenceList = (input.evidence || []).map(item => clean(item)).filter(Boolean);
+  const evidenceTokens = buildEvidenceTokenSet(evidenceList);
+
   const prompt = [
     'You are a clinical safety assistant for a medication reminder app.',
-    'Use Evidence lines as high-confidence inputs for your risk assessment.',
-    'You may also use general pharmacology and clinical interaction knowledge when Evidence is sparse.',
-    'If your conclusion is inferred (not directly from Evidence), explicitly state that in explanation.',
+    'Use Evidence lines as the primary source for your risk assessment.',
+    'Do NOT invent specific side effects, contraindications, or cautions that are absent from Evidence.',
+    'If evidence is sparse, use conservative wording and explicitly say evidence is limited.',
+    'Do not output specific adverse effects unless grounded in the Evidence text.',
     'Use severity "none" only when there is genuinely no plausible interaction risk.',
     'Return only JSON with this exact shape:',
     '{"severity":"high|moderate|low|safe|none","summary":"...","explanation":"...","recommendations":["..."],"cautions":["..."]}',
@@ -375,7 +485,7 @@ export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise
     `Food: ${input.food || 'N/A'}`,
     `Supplements: ${(input.supplements || []).join(', ') || 'N/A'}`,
     `Symptoms: ${(input.symptoms || []).join(', ') || 'N/A'}`,
-    `Evidence: ${(input.evidence || []).join(' | ') || 'N/A'}`,
+    `Evidence: ${evidenceList.join(' | ') || 'N/A'}`,
     'Keep explanation concise and practical for patients.',
   ].join('\n');
 
@@ -404,12 +514,28 @@ export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise
         const rawText = extractGroqText(payload);
         const parsed = parseGeminiJson(rawText);
         if (parsed) {
+          const recommendations = Array.isArray(parsed.recommendations)
+            ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean)
+            : [];
+          const cautions = Array.isArray(parsed.cautions)
+            ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean)
+            : [];
+
+          const evidenceBoundRecommendations = recommendations.filter(item => hasEvidenceOverlap(item, evidenceTokens));
+          const evidenceBoundCautions = cautions.filter(item => hasEvidenceOverlap(item, evidenceTokens));
+
           return {
             severity: normalizeGeminiSeverity(parsed.severity),
             summary: clean(parsed.summary) || 'No summary was returned by Groq.',
             explanation: clean(parsed.explanation) || 'No additional explanation available.',
-            recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean) : [],
-            cautions: Array.isArray(parsed.cautions) ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean) : [],
+            recommendations:
+              evidenceBoundRecommendations.length > 0
+                ? evidenceBoundRecommendations
+                : ['Follow prescribed timing and confirm any concern with your healthcare provider.'],
+            cautions:
+              evidenceBoundCautions.length > 0
+                ? evidenceBoundCautions
+                : ['No evidence-confirmed specific side effect was retrieved from current sources.'],
             source: 'Groq',
           };
         }
@@ -443,13 +569,319 @@ export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise
     const parsed = parseGeminiJson(rawText);
     if (!parsed) return null;
 
+    const recommendations = Array.isArray(parsed.recommendations)
+      ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean)
+      : [];
+    const cautions = Array.isArray(parsed.cautions)
+      ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean)
+      : [];
+
+    const evidenceBoundRecommendations = recommendations.filter(item => hasEvidenceOverlap(item, evidenceTokens));
+    const evidenceBoundCautions = cautions.filter(item => hasEvidenceOverlap(item, evidenceTokens));
+
     return {
       severity: normalizeGeminiSeverity(parsed.severity),
       summary: clean(parsed.summary) || 'No summary was returned by Gemini.',
       explanation: clean(parsed.explanation) || 'No additional explanation available.',
-      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean) : [],
-      cautions: Array.isArray(parsed.cautions) ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean) : [],
+      recommendations:
+        evidenceBoundRecommendations.length > 0
+          ? evidenceBoundRecommendations
+          : ['Follow prescribed timing and confirm any concern with your healthcare provider.'],
+      cautions:
+        evidenceBoundCautions.length > 0
+          ? evidenceBoundCautions
+          : ['No evidence-confirmed specific side effect was retrieved from current sources.'],
       source: 'Gemini',
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const getMissedDoseSeverityInsight = async (
+  input: MissedDoseSeverityInput,
+): Promise<MissedDoseSeverityInsight | null> => {
+  if (!GROQ_API_KEY || !input.missed.length) return null;
+
+  const languageNameByCode: Record<NonNullable<MissedDoseSeverityInput['language']>, string> = {
+    en: 'English',
+    es: 'Spanish',
+    fr: 'French',
+    ta: 'Tamil',
+    te: 'Telugu',
+    hi: 'Hindi',
+  };
+  const languageCode = input.language || 'en';
+  const outputLanguage = languageNameByCode[languageCode] || 'English';
+
+  const prompt = [
+    'You are a medication adherence risk triage assistant.',
+    'Assess missed-dose severity for a patient using the provided missed medication list.',
+    'Provide practical and direct wording for a patient dashboard.',
+    'Summary must explicitly mention at least one exact missed drug name from the Missed meds list.',
+    'You MUST include a progression statement with an estimate of how many additional misses could worsen condition control.',
+    'If uncertain, give a conservative estimate and mention uncertainty in guidance.',
+    `Write summary, guidance, and riskProgression in ${outputLanguage}.`,
+    'Keep medicine names and medical terms in English (drug names, dosage units, diagnosis terms).',
+    'Do not translate medication names listed in Missed meds.',
+    'Return strict JSON only with this exact shape:',
+    '{"severity":"high|moderate|low","summary":"...","guidance":"...","riskProgression":"...","missesUntilWorse":number|null}',
+    `Output language: ${outputLanguage}`,
+    `Patient age: ${input.patientAge ?? 'unknown'}`,
+    `Primary condition: ${input.condition || 'not specified'}`,
+    `Missed meds: ${input.missed
+      .map(item => `${item.drugName} [category=${item.category}, criticality=${item.criticality}, missedCount=${item.missedCount}, lastMissed=${item.lastMissedDate}]`)
+      .join(' | ')}`,
+  ].join('\n');
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.2,
+        max_tokens: 320,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'You are a careful medication adherence risk assistant. Return strict JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const rawText = extractGroqText(payload);
+    const parsed = parseGeminiJson(rawText);
+    if (!parsed) return null;
+
+    const rawMissesUntilWorse =
+      typeof parsed.missesUntilWorse === 'number'
+        ? parsed.missesUntilWorse
+        : typeof parsed.missesUntilWorse === 'string'
+        ? Number(parsed.missesUntilWorse)
+        : null;
+
+    return {
+      severity: normalizeSeverity(parsed.severity),
+      summary: clean(parsed.summary) || 'Missed doses may increase your near-term health risk.',
+      guidance: clean(parsed.guidance) || 'Please follow your medication schedule and contact your clinician if misses continue.',
+      riskProgression: clean(parsed.riskProgression) || 'Further missed doses may worsen control of your condition.',
+      missesUntilWorse:
+        typeof rawMissesUntilWorse === 'number' && Number.isFinite(rawMissesUntilWorse) && rawMissesUntilWorse >= 0
+          ? Math.round(rawMissesUntilWorse)
+          : null,
+      source: 'Groq',
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const getMissedDoseRecoveryAdvice = async (
+  input: MissedDoseRecoveryInput,
+): Promise<MissedDoseRecoveryAdvice | null> => {
+  if (!GROQ_API_KEY) return null;
+
+  const languageNameByCode: Record<NonNullable<MissedDoseRecoveryInput['language']>, string> = {
+    en: 'English',
+    es: 'Spanish',
+    fr: 'French',
+    ta: 'Tamil',
+    te: 'Telugu',
+    hi: 'Hindi',
+  };
+  const outputLanguage = languageNameByCode[input.language || 'en'] || 'English';
+  const nowIso = input.nowIso || new Date().toISOString();
+
+  const prompt = [
+    'You are a technical medication adherence decision assistant.',
+    'Task: advise what to do for a missed dose using conservative clinical safety logic.',
+    'You must decide one action only from this set:',
+    '- take-full-dose-now',
+    '- take-half-dose-now',
+    '- skip-and-resume-next',
+    '- contact-clinician-now',
+    'Rules:',
+    '- Never suggest doubling next dose.',
+    '- If uncertainty is high or medicine is high-criticality, prefer contact-clinician-now or skip-and-resume-next.',
+    '- Use timing from missedScheduledAt vs nowIso and foodTiming in reasoning.',
+    '- Keep drug names and medical terminology in English.',
+    `Write technicalRationale, foodTimingInstruction, and monitoringNotes in ${outputLanguage}.`,
+    'Return strict JSON only with this exact shape:',
+    '{"action":"take-full-dose-now|take-half-dose-now|skip-and-resume-next|contact-clinician-now","urgency":"high|moderate|low","technicalRationale":"...","foodTimingInstruction":"...","monitoringNotes":["..."],"confidence":"high|medium|low"}',
+    `nowIso: ${nowIso}`,
+    `drugName: ${input.medication.drugName}`,
+    `dosage: ${input.medication.dosage}`,
+    `category: ${input.medication.category}`,
+    `criticality: ${input.medication.criticality}`,
+    `frequency: ${input.medication.frequency}`,
+    `foodTiming: ${input.medication.foodTiming}`,
+    `scheduledTime: ${input.medication.scheduledTime}`,
+    `missedScheduledAt: ${input.medication.missedScheduledAt}`,
+    `missedCountForMedication: ${input.medication.missedCountForMedication}`,
+    `missedCountRecentWindow: ${input.medication.missedCountRecentWindow}`,
+  ].join('\n');
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.1,
+        max_tokens: 380,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'You are a conservative medication dosing safety assistant. Return strict JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const rawText = extractGroqText(payload);
+    const parsed = parseGeminiJson(rawText);
+    if (!parsed) return null;
+
+    const action =
+      parsed.action === 'take-full-dose-now' ||
+      parsed.action === 'take-half-dose-now' ||
+      parsed.action === 'skip-and-resume-next' ||
+      parsed.action === 'contact-clinician-now'
+        ? parsed.action
+        : 'contact-clinician-now';
+
+    const urgency =
+      parsed.urgency === 'high' || parsed.urgency === 'moderate' || parsed.urgency === 'low'
+        ? parsed.urgency
+        : 'moderate';
+
+    const confidence =
+      parsed.confidence === 'high' || parsed.confidence === 'medium' || parsed.confidence === 'low'
+        ? parsed.confidence
+        : 'low';
+
+    return {
+      action,
+      urgency,
+      technicalRationale:
+        clean(parsed.technicalRationale) ||
+        'Dose-recovery decision requires conservative safety handling based on missed timing and medication profile.',
+      foodTimingInstruction:
+        clean(parsed.foodTimingInstruction) ||
+        'Keep food timing aligned with label instructions and avoid compensating with extra dose.',
+      monitoringNotes: Array.isArray(parsed.monitoringNotes)
+        ? parsed.monitoringNotes.map((item: string) => clean(item)).filter(Boolean).slice(0, 4)
+        : ['Monitor symptoms closely and seek clinical review if uncertain.'],
+      confidence,
+      source: 'Groq',
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const getDrugAllergyProfileInsight = async (
+  input: DrugAllergyProfileInput,
+): Promise<DrugAllergyProfileInsight | null> => {
+  if (!GROQ_API_KEY || input.medicines.length === 0) return null;
+
+  const languageNameByCode: Record<NonNullable<DrugAllergyProfileInput['language']>, string> = {
+    en: 'English',
+    es: 'Spanish',
+    fr: 'French',
+    ta: 'Tamil',
+    te: 'Telugu',
+    hi: 'Hindi',
+  };
+  const outputLanguage = languageNameByCode[input.language || 'en'] || 'English';
+
+  const normalizedChronic = (input.chronicDiseases || []).filter(Boolean);
+  const normalizedInfections = (input.infectionHistory || []).filter(Boolean);
+  const normalizedAllergies = (input.allergies || [])
+    .map(item => ({
+      category: clean(item.category) || 'Unknown',
+      trigger: clean(item.trigger),
+    }))
+    .filter(item => item.category);
+
+  const prompt = [
+    'You are a medication safety assistant focused on allergy and comorbidity-aware checks.',
+    'Analyze the patient profile for potential drug-allergy and disease/infection related medication risks.',
+    'Strictly avoid fabricated claims; if uncertain, state limited evidence clearly.',
+    `Write summary, findings[].title, findings[].detail, findings[].evidence, and recommendations in ${outputLanguage}.`,
+    'Keep medication names and medical terminology in English.',
+    'Return strict JSON only with this exact shape:',
+    '{"overallRisk":"high|moderate|low|none","summary":"...","findings":[{"severity":"high|moderate|low","title":"...","detail":"...","evidence":"..."}],"recommendations":["..."]}',
+    `Current medicines: ${input.medicines.join(', ')}`,
+    `Chronic diseases: ${normalizedChronic.join(', ') || 'None'}`,
+    `Infection history: ${normalizedInfections.join(', ') || 'None'}`,
+    `Allergies: ${normalizedAllergies.map(item => `${item.category}${item.trigger ? `(${item.trigger})` : ''}`).join(', ') || 'None'}`,
+  ].join('\n');
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.1,
+        max_tokens: 520,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'You are a conservative drug safety assistant. Return strict JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const rawText = extractGroqText(payload);
+    const parsed = parseGeminiJson(rawText);
+    if (!parsed) return null;
+
+    const overallRisk: DrugAllergyProfileInsight['overallRisk'] =
+      parsed.overallRisk === 'high' || parsed.overallRisk === 'moderate' || parsed.overallRisk === 'low' || parsed.overallRisk === 'none'
+        ? parsed.overallRisk
+        : 'none';
+
+    const findings = Array.isArray(parsed.findings)
+      ? parsed.findings
+          .map((item: any) => ({
+            severity:
+              item?.severity === 'high' || item?.severity === 'moderate' || item?.severity === 'low'
+                ? item.severity
+                : 'low',
+            title: clean(item?.title) || 'Potential profile interaction',
+            detail: clean(item?.detail) || 'Review this profile-specific interaction with your clinician.',
+            evidence: clean(item?.evidence) || 'Model-derived profile assessment with limited direct source lines.',
+          }))
+          .slice(0, 6)
+      : [];
+
+    const recommendations = Array.isArray(parsed.recommendations)
+      ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean).slice(0, 5)
+      : [];
+
+    return {
+      overallRisk,
+      summary: clean(parsed.summary) || 'No major profile-based interaction signal was detected from provided data.',
+      findings,
+      recommendations,
+      source: 'Groq',
     };
   } catch {
     return null;

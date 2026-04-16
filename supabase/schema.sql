@@ -59,9 +59,45 @@ create table if not exists logs (
   status text not null check (status in ('pending', 'taken', 'delayed', 'missed', 'skipped')),
   timestamp_marked timestamptz null,
   delay_count integer not null default 0,
+  marked_by text not null default 'system' check (marked_by in ('user', 'system', 'caretaker', 'ai')),
+  status_reason text,
+  status_meta jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
-  unique (medication_id, date)
+  unique (medication_id, date, scheduled_time)
 );
+
+alter table logs add column if not exists marked_by text not null default 'system';
+alter table logs add column if not exists status_reason text;
+alter table logs add column if not exists status_meta jsonb not null default '{}'::jsonb;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'logs_medication_id_date_key'
+  ) then
+    alter table logs drop constraint logs_medication_id_date_key;
+  end if;
+end
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'logs_medication_id_date_scheduled_time_key'
+  ) then
+    alter table logs
+      add constraint logs_medication_id_date_scheduled_time_key
+      unique (medication_id, date, scheduled_time);
+  end if;
+end
+$$;
+
+create index if not exists idx_logs_patient_date on logs (patient_id, date desc);
+create index if not exists idx_logs_medication_date on logs (medication_id, date desc);
 
 create table if not exists notifications (
   id uuid primary key default gen_random_uuid(),
