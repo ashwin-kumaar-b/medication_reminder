@@ -143,6 +143,7 @@ interface MedicineContextType {
   ) => Promise<Medication | null>;
   removeMedication: (id: string) => Promise<void>;
   markDoseStatus: (medicationId: string, status: Extract<DoseStatus, 'taken' | 'delayed' | 'skipped'>) => Promise<void>;
+  triggerEmergencySos: (patientId: string, note?: string) => Promise<void>;
   refreshMonitoring: (patientId?: string) => Promise<void>;
   getPatientDashboardData: (patientId: string) => PatientDashboardData;
   getCaretakerDashboardData: (patientId: string) => CaretakerDashboardData;
@@ -417,6 +418,37 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
             ? `${medication.drugName} was missed and is marked high criticality.`
             : `${medication.drugName} has been missed in consecutive doses.`,
         dedupeKey,
+      });
+    }
+  };
+
+  const triggerEmergencySos = async (patientId: string, note?: string) => {
+    const patient = users.find(existing => existing.id === patientId);
+    const patientName = patient?.name || 'Patient';
+    const patientCondition = patient?.illness || 'Not specified';
+    const linkedCaretakers = users.filter(existing => existing.role === 'caretaker' && existing.linkedPatientId === patientId);
+
+    if (linkedCaretakers.length === 0) {
+      await addNotification({
+        patientId,
+        level: 'red',
+        type: 'patient-risk',
+        title: 'Emergency SOS Sent',
+        message: 'No linked caretaker found. Please contact emergency services immediately if needed.',
+        dedupeKey: `sos-patient-only-${patientId}-${Date.now()}`,
+      });
+      return;
+    }
+
+    for (const caretaker of linkedCaretakers) {
+      await addNotification({
+        patientId,
+        caretakerId: caretaker.id,
+        level: 'red',
+        type: 'caretaker-alert',
+        title: 'Emergency SOS Alert',
+        message: `${patientName} triggered SOS. Condition: ${patientCondition}.${note ? ` Note: ${note}` : ''}`,
+        dedupeKey: `sos-${patientId}-${caretaker.id}-${Date.now()}`,
       });
     }
   };
@@ -872,6 +904,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       updateMedication,
       removeMedication,
       markDoseStatus,
+      triggerEmergencySos,
       refreshMonitoring,
       getPatientDashboardData,
       getCaretakerDashboardData,
@@ -888,6 +921,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       updateMedication,
       removeMedication,
       markDoseStatus,
+      triggerEmergencySos,
       refreshMonitoring,
       getPatientDashboardData,
       getCaretakerDashboardData,

@@ -2,11 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, UiMode } from '@/contexts/AuthContext';
 import { useMedicines } from '@/contexts/MedicineContext';
-<<<<<<< HEAD
-import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, HelpCircle, XCircle, BellRing, Copy } from 'lucide-react';
-=======
-import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, XCircle, BellRing } from 'lucide-react';
->>>>>>> 0fe1a5b126fc7aaca4275dd8dabc3df35f198bc2
+import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, XCircle, BellRing, Copy } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { getMissedDoseSeverityInsight, MissedDoseSeverityInsight } from '@/lib/medicationApis';
@@ -14,10 +10,11 @@ import { getMissedDoseSeverityInsight, MissedDoseSeverityInsight } from '@/lib/m
 const Dashboard = () => {
   const { user, createPatientForCaretaker, getLinkedPatients } = useAuth();
   const { settings, t } = useAppSettings();
-  const { medicines, logs, getCaretakerDashboardData, getPatientDashboardData, markDoseStatus } = useMedicines();
+  const { medicines, logs, notifications, getCaretakerDashboardData, getPatientDashboardData, markDoseStatus, triggerEmergencySos } = useMedicines();
   const { toast } = useToast();
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [savingPatient, setSavingPatient] = useState(false);
+  const [sendingSos, setSendingSos] = useState(false);
   const [statsRange, setStatsRange] = useState<'daily' | 'weekly'>('daily');
   const [missedDoseInsight, setMissedDoseInsight] = useState<MissedDoseSeverityInsight | null>(null);
   const [loadingMissedDoseInsight, setLoadingMissedDoseInsight] = useState(false);
@@ -343,6 +340,30 @@ const Dashboard = () => {
     toast({ title: 'Patient added', description: `${response.user.name} is now linked to your caretaker account.` });
   };
 
+  const handleEmergencySos = async () => {
+    if (!user || user.role !== 'patient') return;
+
+    setSendingSos(true);
+    await triggerEmergencySos(user.id);
+    setSendingSos(false);
+
+    toast({
+      title: 'Emergency SOS sent',
+      description: 'Your caretaker has been alerted with a high-priority SOS message.',
+      variant: 'destructive',
+    });
+  };
+
+  const caretakerSosAlerts = useMemo(() => {
+    if (!activePatientId || user?.role !== 'caretaker') return [];
+
+    return notifications
+      .filter(notification => notification.patientId === activePatientId)
+      .filter(notification => notification.type === 'caretaker-alert' && notification.title.toLowerCase().includes('sos'))
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .slice(0, 5);
+  }, [notifications, activePatientId, user?.role]);
+
   useEffect(() => {
     localStorage.setItem('mediguard_alarm_snooze', JSON.stringify(snoozedUntil));
   }, [snoozedUntil]);
@@ -551,6 +572,21 @@ const Dashboard = () => {
                 ))}
               </div>
             )}
+
+            <h3 className="mb-2 mt-5 text-sm font-semibold text-destructive">Emergency SOS Alerts</h3>
+            {caretakerSosAlerts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No SOS alerts for this patient.</p>
+            ) : (
+              <div className="space-y-2">
+                {caretakerSosAlerts.map(alert => (
+                  <div key={alert.id} className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
+                    <p className="font-semibold text-destructive">{alert.title}</p>
+                    <p className="text-foreground/90">{alert.message}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(alert.createdAt).toLocaleString()}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         )}
       </div>
@@ -561,7 +597,17 @@ const Dashboard = () => {
     <div className="container mx-auto px-4 py-8">
       {/* Welcome */}
       <div className="mb-8 animate-fade-in">
-        <h1 className="text-2xl font-bold text-foreground">{t('dashboard.welcomeBack')}, {user?.name || 'User'} 👋</h1>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <h1 className="text-2xl font-bold text-foreground">{t('dashboard.welcomeBack')}, {user?.name || 'User'} 👋</h1>
+          <button
+            type="button"
+            onClick={() => void handleEmergencySos()}
+            disabled={sendingSos}
+            className="rounded-2xl bg-destructive px-8 py-4 text-xl font-extrabold tracking-wide text-white shadow-elevated hover:opacity-90 disabled:opacity-60"
+          >
+            {sendingSos ? 'Sending SOS...' : 'Emergency SOS'}
+          </button>
+        </div>
         
         {user?.role === 'patient' && user?.patientId && (
           <div className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground opacity-80 transition-opacity hover:opacity-100">
