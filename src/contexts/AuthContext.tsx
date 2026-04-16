@@ -11,11 +11,15 @@ export interface AllergyEntry {
 
 export interface User {
   id: string;
+  patientId?: string;
+  caretakerId?: string;
   name: string;
   email: string;
   phoneNumber?: string;
   password?: string;
   role: UserRole;
+  relation?: string;
+  relationOther?: string;
   gender?: string;
   genderOther?: string;
   bloodGroup?: string;
@@ -37,6 +41,8 @@ interface RegisterInput {
   phoneNumber: string;
   password: string;
   role: UserRole;
+  relation?: string;
+  relationOther?: string;
   gender?: string;
   genderOther?: string;
   bloodGroup?: string;
@@ -84,7 +90,9 @@ interface AuthContextType {
   login: (input: LoginInput) => Promise<AuthResult>;
   logout: () => void;
   getPatientById: (id?: string) => User | undefined;
+  linkExistingPatient: (caretakerId: string, patientMgpId: string) => Promise<{ ok: boolean; error?: string; patient?: User }>;
   getLinkedPatients: (caretakerId?: string) => User[];
+  regeneratePatientId: (userId: string) => Promise<string>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -113,6 +121,24 @@ export const useAuth = () => {
   return context;
 };
 
+const generatePatientId = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'MGP-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
+
+const generateCaretakerId = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'MGC-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [users, setUsers] = useState<User[]>(() => {
     const stored = localStorage.getItem('mediguard_users');
@@ -120,6 +146,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const seedPatient: User = {
       id: crypto.randomUUID(),
+      patientId: 'MGP-DEMO01',
       name: 'Demo Patient',
       email: 'patient@mediguard.demo',
       phoneNumber: '+919999000001',
@@ -214,6 +241,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return {
       id: row.id,
+      patientId: typeof profile.patientId === 'string' ? profile.patientId : undefined,
+      caretakerId: typeof profile.caretakerId === 'string' ? profile.caretakerId : undefined,
       name: row.name,
       email: row.email,
       phoneNumber:
@@ -221,6 +250,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         extractPhoneNumberFromAuthEmail(row.email),
       password: row.password || undefined,
       role: row.role,
+      relation: typeof profile.relation === 'string' ? profile.relation : undefined,
+      relationOther: typeof profile.relationOther === 'string' ? profile.relationOther : undefined,
       gender:
         (typeof row.gender === 'string' ? row.gender : undefined) ||
         (typeof profile.gender === 'string' ? profile.gender : undefined),
@@ -277,6 +308,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     ui_mode: entry.uiMode,
     linked_patient_id: entry.linkedPatientId ?? null,
     profile_json: {
+      patientId: entry.patientId ?? null,
+      caretakerId: entry.caretakerId ?? null,
+      relation: entry.relation ?? null,
+      relationOther: entry.relationOther ?? null,
       phoneNumber: entry.phoneNumber ?? null,
       gender: entry.gender ?? null,
       genderOther: entry.genderOther ?? null,
@@ -416,11 +451,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (isSupabaseConfigured && supabase) {
       const newUser: User = {
         id: crypto.randomUUID(),
+        patientId: input.role === 'patient' ? generatePatientId() : undefined,
+        caretakerId: input.role === 'caretaker' ? generateCaretakerId() : undefined,
         name: input.name.trim(),
         email: authEmail,
         phoneNumber: normalizedPhoneNumber,
         password: input.password,
         role: input.role,
+        relation: input.role === 'caretaker' ? input.relation : undefined,
+        relationOther: input.role === 'caretaker' && input.relation === 'Other' ? input.relationOther : undefined,
         gender: normalizedGender,
         genderOther: normalizedGender === 'Other' ? normalizedGenderOther : undefined,
         bloodGroup: normalizedBloodGroup || undefined,
@@ -469,11 +508,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const newUser: User = {
       id: crypto.randomUUID(),
+      patientId: input.role === 'patient' ? generatePatientId() : undefined,
+      caretakerId: input.role === 'caretaker' ? generateCaretakerId() : undefined,
       name: input.name.trim(),
       email: authEmail,
       phoneNumber: normalizedPhoneNumber,
       password: input.password,
       role: input.role,
+      relation: input.role === 'caretaker' ? input.relation : undefined,
+      relationOther: input.role === 'caretaker' && input.relation === 'Other' ? input.relationOther : undefined,
       gender: normalizedGender,
       genderOther: normalizedGender === 'Other' ? normalizedGenderOther : undefined,
       bloodGroup: normalizedBloodGroup || undefined,
@@ -521,6 +564,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const newPatient: User = {
       id: crypto.randomUUID(),
+      patientId: generatePatientId(),
       name: input.name.trim(),
       email: normalizedEmail,
       password: input.password,
@@ -604,9 +648,66 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const regeneratePatientId = async (userId: string) => {
+    const newPatientId = generatePatientId();
+
+    setUsers(prev =>
+      prev.map(u => (u.id === userId ? { ...u, patientId: newPatientId } : u)),
+    );
+
+    if (user?.id === userId) {
+      persistUserSession({ ...user, patientId: newPatientId });
+    }
+
+    // Disconnect old linked caretakers
+    setCaretakerLinks(prev => prev.filter(link => link.patientId !== userId));
+
+    if (isSupabaseConfigured && supabase) {
+      await supabase.from('caretaker_patients').delete().eq('patient_id', userId);
+      const userToUpdate = users.find(u => u.id === userId);
+      if (userToUpdate) {
+        await upsertUserRow({ ...userToUpdate, patientId: newPatientId }, '__supabase_auth__');
+      }
+    }
+    
+    return newPatientId;
+  };
+
   const getPatientById = (id?: string) => {
     if (!id) return undefined;
     return users.find(existing => existing.id === id && existing.role === 'patient');
+  };
+
+  const linkExistingPatient = async (caretakerId: string, patientMgpId: string) => {
+    const mgpId = patientMgpId.trim().toUpperCase();
+    if (!mgpId.startsWith('MGP-')) {
+      return { ok: false, error: 'Invalid ID. It should start with MGP-' };
+    }
+
+    const targetPatient = users.find(existing => existing.patientId === mgpId && existing.role === 'patient');
+    if (!targetPatient) {
+      return { ok: false, error: 'Patient with this ID not found.' };
+    }
+
+    // Check if already linked
+    if (caretakerLinks.some(link => link.caretakerId === caretakerId && link.patientId === targetPatient.id)) {
+      return { ok: false, error: 'Patient is already linked to your account.' };
+    }
+
+    const nextLinks = [...caretakerLinks, { caretakerId, patientId: targetPatient.id }];
+    setCaretakerLinks(nextLinks);
+
+    if (isSupabaseConfigured && supabase) {
+      await supabase.from('caretaker_patients').upsert(
+        {
+          caretaker_id: caretakerId,
+          patient_id: targetPatient.id,
+        },
+        { onConflict: 'caretaker_id,patient_id' },
+      );
+    }
+
+    return { ok: true, patient: targetPatient };
   };
 
   const getLinkedPatients = (caretakerId?: string) => {
@@ -637,7 +738,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       login,
       logout,
       getPatientById,
+      linkExistingPatient,
       getLinkedPatients,
+      regeneratePatientId,
     }),
     [user, users, loadingUsers, caretakerLinks],
   );

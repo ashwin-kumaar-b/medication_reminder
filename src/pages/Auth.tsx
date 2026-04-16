@@ -1,16 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Shield, Loader2, Eye, EyeOff, CheckCircle, Copy } from 'lucide-react';
 import { useAuth, UiMode, UserRole } from '@/contexts/AuthContext';
 import { attachOneSignalIdentity } from '@/lib/onesignal';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-
-const roleOptions: Array<{ value: UserRole; label: string }> = [
-  { value: 'patient', label: 'Patient' },
-  { value: 'caretaker', label: 'Caretaker' },
-];
 
 const uiModes: Array<{ value: UiMode; label: string }> = [
   { value: 'younger', label: 'Younger Interface (vivid)' },
@@ -77,6 +72,8 @@ const Auth = () => {
   const [isOtpSent, setIsOtpSent] = useState(false);
   const [isOtpVerified, setIsOtpVerified] = useState(false);
   const [role, setRole] = useState<UserRole>('patient');
+  const [relation, setRelation] = useState('');
+  const [relationOther, setRelationOther] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState('');
   const [genderOther, setGenderOther] = useState('');
@@ -97,6 +94,7 @@ const Auth = () => {
   const [emergencyContactEmail, setEmergencyContactEmail] = useState('');
   const [uiMode, setUiMode] = useState<UiMode>('younger');
   const [linkedPatientId, setLinkedPatientId] = useState('');
+  const [successScreen, setSuccessScreen] = useState<{ open: boolean; name: string; patientId: string; role: 'patient' | 'caretaker' } | null>(null);
   const { register, login } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -111,6 +109,8 @@ const Auth = () => {
     setIsOtpSent(false);
     setIsOtpVerified(false);
     setRole('patient');
+    setRelation('');
+    setRelationOther('');
     setDateOfBirth('');
     setGender('');
     setGenderOther('');
@@ -215,7 +215,8 @@ const Auth = () => {
     isOtpVerified &&
     password.trim().length >= 8 &&
     password === confirmPassword &&
-    dateOfBirth.trim().length > 0 &&
+    (role === 'caretaker' || dateOfBirth.trim().length > 0) &&
+    (role === 'patient' || relation.trim().length > 0) &&
     !!role;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -269,12 +270,17 @@ const Auth = () => {
         });
         return;
       }
-      setRegisterStep(2);
-      return;
+
+      if (role === 'caretaker') {
+        // Skip step 2 for caretakers
+      } else {
+        setRegisterStep(2);
+        return;
+      }
     }
 
     if (mode === 'register' && registerStep === 2) {
-      if (!gender) {
+      if (role === 'patient' && !gender) {
         setGenderError('Please select your gender');
         toast({
           title: 'Gender is required',
@@ -283,7 +289,7 @@ const Auth = () => {
         });
         return;
       }
-      setGenderError('');
+      if (role === 'patient') setGenderError('');
     }
 
     setLoading(true);
@@ -307,7 +313,9 @@ const Auth = () => {
           gender,
           genderOther: gender === 'Other' ? genderOther.trim() : undefined,
           bloodGroup,
-            dateOfBirth,
+          relation: role === 'caretaker' ? relation : undefined,
+          relationOther: role === 'caretaker' && relation === 'Other' ? relationOther.trim() : undefined,
+          dateOfBirth,
             heightCm: heightCm ? Number(heightCm) : undefined,
             weightKg: weightKg ? Number(weightKg) : undefined,
             chronicDiseases: normalizedChronicDiseases,
@@ -340,14 +348,76 @@ const Auth = () => {
     }
 
     await attachOneSignalIdentity(response.user.id);
+    
+    if (mode === 'register' && response.user.role === 'patient' && response.user.patientId) {
+      setSuccessScreen({ open: true, name: response.user.name, patientId: response.user.patientId, role: 'patient' });
+      setLoading(false);
+      return;
+    }
+
+    if (mode === 'register' && response.user.role === 'caretaker' && response.user.caretakerId) {
+      setSuccessScreen({ open: true, name: response.user.name, patientId: response.user.caretakerId, role: 'caretaker' });
+      setLoading(false);
+      return;
+    }
+
     toast({
       title: mode === 'register' ? 'Account created' : 'Welcome back',
       description: `${response.user.name} signed in as ${response.user.role}.`,
     });
     clearForm();
-    navigate('/dashboard');
+    navigate(response.user.role === 'caretaker' ? '/caretaker' : '/dashboard');
     setLoading(false);
   };
+
+  if (successScreen?.open) {
+    return (
+      <div className="gradient-hero flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-10">
+        <div className="w-full max-w-md animate-fade-in rounded-2xl border border-border bg-card p-8 text-center shadow-elevated">
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-teal-100">
+            <CheckCircle className="h-10 w-10 text-teal-600 animate-in zoom-in spin-in-12" />
+          </div>
+          <h1 className="mb-2 text-2xl font-bold text-foreground">Welcome to MediGuard AI, {successScreen.name}!</h1>
+          <p className="mb-6 text-sm text-muted-foreground">Your account has been created successfully.</p>
+          
+          <div className="mb-6 rounded-xl border border-teal-200 bg-teal-50 p-6">
+            <p className="mb-2 text-sm font-medium text-teal-800">
+              {successScreen.role === 'caretaker' ? 'Your Caretaker ID:' : 'Your Patient ID:'}
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <span className="text-3xl font-bold tracking-wider text-teal-700">{successScreen.patientId}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(successScreen.patientId);
+                  toast({ title: 'ID Copied', description: `${successScreen.role === 'caretaker' ? 'Caretaker' : 'Patient'} ID copied to clipboard.`, duration: 2000 });
+                }}
+                className="rounded-full bg-teal-200 p-2 text-teal-800 transition-colors hover:bg-teal-300"
+              >
+                <Copy className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+          
+          <p className="mb-8 text-sm text-muted-foreground">
+            {successScreen.role === 'caretaker' 
+              ? 'Share this ID with the patient so they can link your account.'
+              : 'Share this ID with your caretaker so they can manage your medicines.'}
+          </p>
+
+          <button
+            onClick={() => {
+              clearForm();
+              navigate(successScreen.role === 'caretaker' ? '/caretaker' : '/dashboard');
+            }}
+            className="w-full rounded-lg bg-teal-600 py-3 font-semibold text-white transition-opacity hover:opacity-90"
+          >
+            Continue to {successScreen.role === 'caretaker' ? 'Portal' : 'Dashboard'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="gradient-hero flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-10">
@@ -365,6 +435,42 @@ const Auth = () => {
             Supabase is not configured. Accounts created here are saved only on this browser and will not appear in Supabase Authentication until environment keys are added.
           </div>
         )}
+
+        <div className="mb-6 grid grid-cols-2 gap-4">
+          <button
+            type="button"
+            onClick={() => setRole('patient')}
+            className={`flex flex-col items-center justify-center rounded-xl border-2 p-4 transition-all ${
+              role === 'patient'
+                ? 'border-primary bg-primary/10 shadow-md'
+                : 'border-border bg-card hover:bg-muted'
+            }`}
+          >
+            <div className="mb-2 rounded-full bg-primary/20 p-3 text-primary">
+              <Shield className="h-6 w-6" />
+            </div>
+            <span className={`font-semibold ${role === 'patient' ? 'text-primary' : 'text-foreground'}`}>
+              Patient
+            </span>
+          </button>
+          
+          <button
+            type="button"
+            onClick={() => setRole('caretaker')}
+            className={`flex flex-col items-center justify-center rounded-xl border-2 p-4 transition-all ${
+              role === 'caretaker'
+                ? 'border-primary bg-primary/10 shadow-md'
+                : 'border-border bg-card hover:bg-muted'
+            }`}
+          >
+            <div className="mb-2 rounded-full bg-emerald-500/20 p-3 text-emerald-600">
+              <span className="flex h-6 w-6 items-center justify-center text-xl font-bold">C</span>
+            </div>
+            <span className={`font-semibold ${role === 'caretaker' ? 'text-primary' : 'text-foreground'}`}>
+              Caretaker
+            </span>
+          </button>
+        </div>
 
         <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-muted p-1">
           <button
@@ -388,7 +494,7 @@ const Auth = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {mode === 'register' && (
+          {mode === 'register' && role === 'patient' && (
             <div className="rounded-lg border border-border bg-muted/40 p-2 text-center text-sm font-semibold text-muted-foreground">
               Step {registerStep} of 2
             </div>
@@ -397,7 +503,7 @@ const Auth = () => {
           {mode === 'register' && registerStep === 1 && (
             <>
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">Full Name</label>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">{role === 'caretaker' ? 'Caretaker Name' : 'Full Name'}</label>
                 <input
                   value={name}
                   onChange={e => setName(e.target.value)}
@@ -491,93 +597,133 @@ const Auth = () => {
                 />
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">Date of Birth</label>
-                <input
-                  value={dateOfBirth}
-                  onChange={e => setDateOfBirth(e.target.value)}
-                  type="date"
-                  required
-                  className={`${registerFieldClass} ${registerFieldSizeClass}`}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">Format: YYYY-MM-DD</p>
-              </div>
+              {role === 'patient' && (
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">Date of Birth</label>
+                  <input
+                    value={dateOfBirth}
+                    onChange={e => setDateOfBirth(e.target.value)}
+                    type="date"
+                    required
+                    className={`${registerFieldClass} ${registerFieldSizeClass}`}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">Format: YYYY-MM-DD</p>
+                </div>
+              )}
+
+              {role === 'caretaker' && (
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">Relation to Patient <span className="text-red-500">*</span></label>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                    {['Family', 'Nurse', 'Doctor', 'Other'].map(r => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => {
+                          setRelation(r);
+                          if (r !== 'Other') setRelationOther('');
+                        }}
+                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                          relation === r
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-input bg-card text-foreground hover:bg-muted'
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                  {relation === 'Other' && (
+                    <div className="mt-3 animate-in slide-in-from-top-2 fade-in-50">
+                      <input
+                        value={relationOther}
+                        onChange={e => setRelationOther(e.target.value)}
+                        placeholder="Please specify"
+                        required
+                        className={`${registerFieldClass} ${registerFieldSizeClass}`}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
             </>
           )}
 
           {mode === 'register' && registerStep === 2 && (
             <div className={`grid gap-4 ${isOlderLayout ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
-              <div className={isOlderLayout ? '' : 'sm:col-span-2'}>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
-                      Gender <span className="text-red-500">*</span>
-                    </label>
-                    <div
-                      className={`grid grid-cols-3 gap-1 rounded-xl border bg-background p-1.5 ${
-                        genderError ? 'border-red-500 ring-1 ring-red-500/30' : 'border-input'
-                      }`}
-                    >
-                      {['Male', 'Female', 'Other'].map(option => (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => {
-                            setGender(option);
-                            if (option !== 'Other') setGenderOther('');
-                            if (genderError) setGenderError('');
-                          }}
-                          className={`min-h-[48px] rounded-lg px-2 text-sm font-semibold transition-colors ${
-                            gender === option
-                              ? 'bg-primary text-primary-foreground shadow-card'
-                              : 'text-muted-foreground hover:bg-muted'
-                          }`}
-                        >
-                          {option}
-                        </button>
-                      ))}
-                    </div>
-                    {genderError && <p className="mt-1 text-xs font-semibold text-red-600">{genderError}</p>}
-                    {gender === 'Other' && (
-                      <div className="mt-3 animate-in slide-in-from-top-2 fade-in-50">
-                        <input
-                          value={genderOther}
-                          onChange={e => setGenderOther(e.target.value)}
-                          placeholder="Please specify (optional)"
-                          className={`${registerFieldClass} ${registerFieldSizeClass}`}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
-                      Blood Group <span className="text-muted-foreground">(optional)</span>
-                    </label>
-                    <Select
-                      value={bloodGroup}
-                      onValueChange={val => setBloodGroup(val)}
-                    >
-                      <SelectTrigger className={`min-h-[48px] w-full rounded-xl text-sm font-medium ${isOlderLayout ? 'text-lg' : ''}`}>
-                        <SelectValue placeholder="Select blood group" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-60">
-                        {['A+', 'A−', 'B+', 'B−', 'AB+', 'AB−', 'O+', 'O−', "Don't know"].map(bg => (
-                          <SelectItem key={bg} value={bg}>
-                            {bg}
-                          </SelectItem>
+              {role === 'patient' && (
+                <div className={isOlderLayout ? '' : 'sm:col-span-2'}>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
+                        Gender <span className="text-red-500">*</span>
+                      </label>
+                      <div
+                        className={`grid grid-cols-3 gap-1 rounded-xl border bg-background p-1.5 ${
+                          genderError ? 'border-red-500 ring-1 ring-red-500/30' : 'border-input'
+                        }`}
+                      >
+                        {['Male', 'Female', 'Other'].map(option => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => {
+                              setGender(option);
+                              if (option !== 'Other') setGenderOther('');
+                              if (genderError) setGenderError('');
+                            }}
+                            className={`min-h-[48px] rounded-lg px-2 text-sm font-semibold transition-colors ${
+                              gender === option
+                                ? 'bg-primary text-primary-foreground shadow-card'
+                                : 'text-muted-foreground hover:bg-muted'
+                            }`}
+                          >
+                            {option}
+                          </button>
                         ))}
-                      </SelectContent>
-                    </Select>
-                    {bloodGroup === "Don't know" && (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        You can update this later in your profile.
-                      </p>
-                    )}
+                      </div>
+                      {genderError && <p className="mt-1 text-xs font-semibold text-red-600">{genderError}</p>}
+                      {gender === 'Other' && (
+                        <div className="mt-3 animate-in slide-in-from-top-2 fade-in-50">
+                          <input
+                            value={genderOther}
+                            onChange={e => setGenderOther(e.target.value)}
+                            placeholder="Please specify (optional)"
+                            className={`${registerFieldClass} ${registerFieldSizeClass}`}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
+                        Blood Group <span className="text-muted-foreground">(optional)</span>
+                      </label>
+                      <Select
+                        value={bloodGroup}
+                        onValueChange={val => setBloodGroup(val)}
+                      >
+                        <SelectTrigger className={`min-h-[48px] w-full rounded-xl text-sm font-medium ${isOlderLayout ? 'text-lg' : ''}`}>
+                          <SelectValue placeholder="Select blood group" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-60">
+                          {['A+', 'A−', 'B+', 'B−', 'AB+', 'AB−', 'O+', 'O−', "Don't know"].map(bg => (
+                            <SelectItem key={bg} value={bg}>
+                              {bg}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {bloodGroup === "Don't know" && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          You can update this later in your profile.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-foreground">How tall are you? (cm)</label>
@@ -738,7 +884,7 @@ const Auth = () => {
             </div>
           )}
 
-          {mode === 'register' && (
+          {mode === 'register' && role === 'patient' && (
             <div>
               <label className="mb-1.5 block text-sm font-medium text-foreground">Preferred Interface</label>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -816,7 +962,7 @@ const Auth = () => {
             {loading ? (
               <Loader2 className="h-5 w-5 animate-spin" />
             ) : mode === 'register' ? (
-              registerStep === 1 ? 'Continue to Step 2' : 'Create Account'
+              registerStep === 1 && role === 'patient' ? 'Continue to Step 2' : 'Create Account'
             ) : (
               'Login'
             )}

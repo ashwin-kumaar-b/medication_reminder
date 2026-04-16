@@ -18,6 +18,7 @@ import FoodCheck from "@/pages/FoodCheck";
 import CanITake from "@/pages/CanITake";
 import MissedDoses from "@/pages/MissedDoses";
 import Settings from "@/pages/Settings";
+import CaretakerPortal from "@/pages/Caretaker/CaretakerPortal";
 import NotFound from "@/pages/NotFound";
 import { SettingsProvider } from "@/features/settings/SettingsContext";
 
@@ -51,6 +52,7 @@ const App = () => (
                         <Routes>
                           <Route path="/" element={<Landing />} />
                           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                          <Route path="/caretaker" element={<ProtectedRoute allowRoles={['caretaker']}><CaretakerPortal /></ProtectedRoute>} />
                           <Route path="/add-medicine" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><AddMedicine /></ProtectedRoute>} />
                           <Route path="/edit-medicine/:id" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><EditMedicine /></ProtectedRoute>} />
                           <Route path="/medicines" element={<ProtectedRoute><Medicines /></ProtectedRoute>} />
