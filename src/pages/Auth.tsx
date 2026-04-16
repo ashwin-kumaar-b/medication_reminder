@@ -5,6 +5,7 @@ import { useAuth, UiMode, UserRole } from '@/contexts/AuthContext';
 import { attachOneSignalIdentity } from '@/lib/onesignal';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const roleOptions: Array<{ value: UserRole; label: string }> = [
   { value: 'patient', label: 'Patient' },
@@ -77,6 +78,10 @@ const Auth = () => {
   const [isOtpVerified, setIsOtpVerified] = useState(false);
   const [role, setRole] = useState<UserRole>('patient');
   const [dateOfBirth, setDateOfBirth] = useState('');
+  const [gender, setGender] = useState('');
+  const [genderOther, setGenderOther] = useState('');
+  const [genderError, setGenderError] = useState('');
+  const [bloodGroup, setBloodGroup] = useState('');
   const [heightCm, setHeightCm] = useState<string>('');
   const [weightKg, setWeightKg] = useState<string>('');
   const [chronicDiseaseInput, setChronicDiseaseInput] = useState('');
@@ -107,6 +112,10 @@ const Auth = () => {
     setIsOtpVerified(false);
     setRole('patient');
     setDateOfBirth('');
+    setGender('');
+    setGenderOther('');
+    setGenderError('');
+    setBloodGroup('');
     setHeightCm('');
     setWeightKg('');
     setChronicDiseaseInput('');
@@ -264,6 +273,19 @@ const Auth = () => {
       return;
     }
 
+    if (mode === 'register' && registerStep === 2) {
+      if (!gender) {
+        setGenderError('Please select your gender');
+        toast({
+          title: 'Gender is required',
+          description: 'Please select your gender to continue.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      setGenderError('');
+    }
+
     setLoading(true);
 
     const normalizedChronicDiseases = chronicDiseaseInput.trim() ? [chronicDiseaseInput.trim()] : ['None'];
@@ -282,6 +304,9 @@ const Auth = () => {
             phoneNumber: normalizedPhoneNumber,
             password,
             role,
+          gender,
+          genderOther: gender === 'Other' ? genderOther.trim() : undefined,
+          bloodGroup,
             dateOfBirth,
             heightCm: heightCm ? Number(heightCm) : undefined,
             weightKg: weightKg ? Number(weightKg) : undefined,
@@ -483,6 +508,77 @@ const Auth = () => {
 
           {mode === 'register' && registerStep === 2 && (
             <div className={`grid gap-4 ${isOlderLayout ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
+              <div className={isOlderLayout ? '' : 'sm:col-span-2'}>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
+                      Gender <span className="text-red-500">*</span>
+                    </label>
+                    <div
+                      className={`grid grid-cols-3 gap-1 rounded-xl border bg-background p-1.5 ${
+                        genderError ? 'border-red-500 ring-1 ring-red-500/30' : 'border-input'
+                      }`}
+                    >
+                      {['Male', 'Female', 'Other'].map(option => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => {
+                            setGender(option);
+                            if (option !== 'Other') setGenderOther('');
+                            if (genderError) setGenderError('');
+                          }}
+                          className={`min-h-[48px] rounded-lg px-2 text-sm font-semibold transition-colors ${
+                            gender === option
+                              ? 'bg-primary text-primary-foreground shadow-card'
+                              : 'text-muted-foreground hover:bg-muted'
+                          }`}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                    {genderError && <p className="mt-1 text-xs font-semibold text-red-600">{genderError}</p>}
+                    {gender === 'Other' && (
+                      <div className="mt-3 animate-in slide-in-from-top-2 fade-in-50">
+                        <input
+                          value={genderOther}
+                          onChange={e => setGenderOther(e.target.value)}
+                          placeholder="Please specify (optional)"
+                          className={`${registerFieldClass} ${registerFieldSizeClass}`}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
+                      Blood Group <span className="text-muted-foreground">(optional)</span>
+                    </label>
+                    <Select
+                      value={bloodGroup}
+                      onValueChange={val => setBloodGroup(val)}
+                    >
+                      <SelectTrigger className={`min-h-[48px] w-full rounded-xl text-sm font-medium ${isOlderLayout ? 'text-lg' : ''}`}>
+                        <SelectValue placeholder="Select blood group" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-60">
+                        {['A+', 'A−', 'B+', 'B−', 'AB+', 'AB−', 'O+', 'O−', "Don't know"].map(bg => (
+                          <SelectItem key={bg} value={bg}>
+                            {bg}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {bloodGroup === "Don't know" && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        You can update this later in your profile.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-foreground">How tall are you? (cm)</label>
                 <input

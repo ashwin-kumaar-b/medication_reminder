@@ -16,6 +16,9 @@ export interface User {
   phoneNumber?: string;
   password?: string;
   role: UserRole;
+  gender?: string;
+  genderOther?: string;
+  bloodGroup?: string;
   age?: number;
   illness?: string;
   dateOfBirth?: string;
@@ -34,6 +37,9 @@ interface RegisterInput {
   phoneNumber: string;
   password: string;
   role: UserRole;
+  gender?: string;
+  genderOther?: string;
+  bloodGroup?: string;
   age?: number;
   illness?: string;
   dateOfBirth?: string;
@@ -215,6 +221,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         extractPhoneNumberFromAuthEmail(row.email),
       password: row.password || undefined,
       role: row.role,
+      gender:
+        (typeof row.gender === 'string' ? row.gender : undefined) ||
+        (typeof profile.gender === 'string' ? profile.gender : undefined),
+      genderOther:
+        (typeof row.gender_other === 'string' ? row.gender_other : undefined) ||
+        (typeof profile.genderOther === 'string' ? profile.genderOther : undefined),
+      bloodGroup:
+        (typeof row.blood_group === 'string' ? row.blood_group : undefined) ||
+        (typeof profile.bloodGroup === 'string' ? profile.bloodGroup : undefined),
       age: typeof row.age === 'number' ? row.age : ageFromDob,
       illness:
         (typeof row.illness === 'string' ? row.illness : undefined) ||
@@ -263,6 +278,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     linked_patient_id: entry.linkedPatientId ?? null,
     profile_json: {
       phoneNumber: entry.phoneNumber ?? null,
+      gender: entry.gender ?? null,
+      genderOther: entry.genderOther ?? null,
+      bloodGroup: entry.bloodGroup ?? null,
       dateOfBirth: entry.dateOfBirth ?? null,
       heightCm: entry.heightCm ?? null,
       weightKg: entry.weightKg ?? null,
@@ -377,6 +395,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const profileMode = input.uiMode || inferUiMode(input.age, input.dateOfBirth);
+    const normalizedGender = input.gender?.trim();
+    const normalizedGenderOther = input.genderOther?.trim();
+    const normalizedBloodGroup = input.bloodGroup?.trim();
+
+    if (!normalizedGender) {
+      return { ok: false, error: 'Please select your gender.' };
+    }
+
     const normalizedChronicDiseases = normalizeStringArray(input.chronicDiseases) || ['None'];
     const normalizedInfectionHistory = normalizeStringArray(input.infectionHistory) || ['None'];
     const normalizedAllergies = normalizeAllergies(input.allergies) || [];
@@ -395,6 +421,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         phoneNumber: normalizedPhoneNumber,
         password: input.password,
         role: input.role,
+        gender: normalizedGender,
+        genderOther: normalizedGender === 'Other' ? normalizedGenderOther : undefined,
+        bloodGroup: normalizedBloodGroup || undefined,
         age: resolvedAge,
         illness: resolvedIllness,
         dateOfBirth: input.dateOfBirth,
@@ -445,6 +474,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       phoneNumber: normalizedPhoneNumber,
       password: input.password,
       role: input.role,
+      gender: normalizedGender,
+      genderOther: normalizedGender === 'Other' ? normalizedGenderOther : undefined,
+      bloodGroup: normalizedBloodGroup || undefined,
       age: resolvedAge,
       illness: resolvedIllness,
       dateOfBirth: input.dateOfBirth,
