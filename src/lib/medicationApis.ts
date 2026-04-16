@@ -1,6 +1,7 @@
 const OPENFDA_API_KEY = import.meta.env.VITE_OPENFDA_API_KEY as string | undefined;
 const USDA_API_KEY = import.meta.env.VITE_USDA_API_KEY as string | undefined;
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY as string | undefined;
 const DDINTER_API_URL = import.meta.env.VITE_DDINTER_API_URL as string | undefined;
 
 const ALLOWED_RXNAV_TTYS = new Set(['IN', 'PIN', 'MIN', 'SCD', 'SBD', 'SCDC', 'SBDC']);
@@ -37,7 +38,7 @@ export interface GeminiMedicalAdvice {
   explanation: string;
   recommendations: string[];
   cautions: string[];
-  source: 'Gemini';
+  source: 'Gemini' | 'Groq';
 }
 
 interface GeminiMedicalInput {
@@ -77,6 +78,8 @@ const extractGeminiText = (payload: any) => {
     .trim();
 };
 
+  const extractGroqText = (payload: any) => clean(payload?.choices?.[0]?.message?.content);
+
 const parseGeminiJson = (raw: string) => {
   const cleaned = raw.replace(/```json|```/gi, '').trim();
   const start = cleaned.indexOf('{');
@@ -109,6 +112,31 @@ const buildDdinterUrl = (drugA: string, drugB: string) => {
 };
 
 const normalizeDrugName = (name: string) => clean(name).replace(/^\{+/, '').replace(/\}+$/, '').trim();
+
+const getOpenFdaSearchTerms = (drugName: string) => {
+  const cleaned = clean(drugName)
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\([^\)]*\)/g, ' ');
+
+  const parts = cleaned
+    .split(/\/|,| and | with /i)
+    .map(part => clean(part))
+    .filter(Boolean);
+
+  const normalized = [cleaned, ...parts]
+    .map(term =>
+      clean(
+        term
+          .replace(/\b\d+(\.\d+)?\s*(mg|mcg|g|ml|iu|units?)\b/gi, ' ')
+          .replace(/\b(oral|tablet|capsule|solution|suspension|injection|extended release|er|xr|sr)\b/gi, ' '),
+      ),
+    )
+    .filter(Boolean);
+
+  const unique = new Set<string>();
+  normalized.forEach(item => unique.add(item));
+  return Array.from(unique).slice(0, 4);
+};
 
 const isNoisySuggestion = (name: string) => {
   const lower = name.toLowerCase();
@@ -241,15 +269,31 @@ export const getDdinterInteractions = async (drugA: string, drugB: string): Prom
 export const getOpenFdaSafety = async (drugName: string): Promise<OpenFdaSafety | null> => {
   if (!OPENFDA_API_KEY) return null;
 
-  const query = `openfda.brand_name:"${drugName}"+openfda.generic_name:"${drugName}"`;
-  const response = await fetch(
-    `https://api.fda.gov/drug/label.json?api_key=${encodeURIComponent(OPENFDA_API_KEY)}&search=${encodeURIComponent(query)}&limit=1`,
-  );
+  const terms = getOpenFdaSearchTerms(drugName);
+  let label: any = null;
 
-  if (!response.ok) return null;
+  for (const term of terms) {
+    const escaped = term.replace(/"/g, '');
+    const query = [
+      `openfda.brand_name:"${escaped}"`,
+      `openfda.generic_name:"${escaped}"`,
+      `openfda.substance_name:"${escaped}"`,
+    ].join('+OR+');
 
-  const data = await response.json();
-  const label = data?.results?.[0];
+    try {
+      const response = await fetch(
+        `https://api.fda.gov/drug/label.json?api_key=${encodeURIComponent(OPENFDA_API_KEY)}&search=${encodeURIComponent(query)}&limit=1`,
+      );
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      label = data?.results?.[0] || null;
+      if (label) break;
+    } catch {
+      continue;
+    }
+  }
+
   if (!label) return null;
 
   return {
@@ -280,8 +324,8 @@ export const searchUsdaFood = async (foodTerm: string): Promise<UsdaFoodMatch | 
 export const inferFoodRiskFromOpenFda = (safety: OpenFdaSafety | null, foodQuery: string) => {
   if (!safety) {
     return {
-      severity: 'moderate' as const,
-      summary: 'OpenFDA label data was not available for this medication query.',
+      severity: 'safe' as const,
+      summary: 'OpenFDA label data was not available for this medication query, so no warning-level classification was applied.',
       evidence: [],
     };
   }
@@ -312,8 +356,6 @@ export const inferFoodRiskFromOpenFda = (safety: OpenFdaSafety | null, foodQuery
 };
 
 export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise<GeminiMedicalAdvice | null> => {
-  if (!GEMINI_API_KEY) return null;
-
   const prompt = [
     'You are a clinical safety assistant for a medication reminder app.',
     'Return only JSON with this exact shape:',
@@ -329,9 +371,51 @@ export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise
     'Keep explanation concise and practical for patients.',
   ].join('\n');
 
+  if (GROQ_API_KEY) {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          temperature: 0.2,
+          max_tokens: 400,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: 'You are a careful medication safety assistant. Return strict JSON only.' },
+            { role: 'user', content: prompt },
+          ],
+        }),
+      });
+
+      if (response.ok) {
+        const payload = await response.json();
+        const rawText = extractGroqText(payload);
+        const parsed = parseGeminiJson(rawText);
+        if (parsed) {
+          return {
+            severity: normalizeGeminiSeverity(parsed.severity),
+            summary: clean(parsed.summary) || 'No summary was returned by Groq.',
+            explanation: clean(parsed.explanation) || 'No additional explanation available.',
+            recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean) : [],
+            cautions: Array.isArray(parsed.cautions) ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean) : [],
+            source: 'Groq',
+          };
+        }
+      }
+    } catch {
+      // Fall back to Gemini when Groq is unavailable.
+    }
+  }
+
+  if (!GEMINI_API_KEY) return null;
+
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
