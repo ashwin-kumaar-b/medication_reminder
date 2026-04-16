@@ -153,6 +153,11 @@ const Dashboard = () => {
     [missedMedicationRows],
   );
 
+  const missedDrugNames = useMemo(
+    () => missedMedicationRows.map(item => item.drugName).filter(Boolean).join(', '),
+    [missedMedicationRows],
+  );
+
   const playBeep = () => {
     if (settings.notificationSound === 'cherie') {
       if (!alarmAudioRef.current) {
@@ -382,6 +387,7 @@ const Dashboard = () => {
       const insight = await getMissedDoseSeverityInsight({
         patientAge: user?.age,
         condition: user?.illness,
+        language: settings.language,
         missed: missedMedicationRows,
       });
       if (cancelled) return;
@@ -394,7 +400,7 @@ const Dashboard = () => {
     return () => {
       cancelled = true;
     };
-  }, [user?.role, user?.age, user?.illness, missedMedicationFingerprint]);
+  }, [user?.role, user?.age, user?.illness, settings.language, missedMedicationFingerprint]);
 
   if (user?.role === 'caretaker') {
     return (
@@ -592,7 +598,7 @@ const Dashboard = () => {
               <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-destructive/15 text-destructive animate-pulse">
                 <AlertTriangle className="h-4 w-4" />
               </span>
-              <h2 className="text-lg font-extrabold tracking-wide text-destructive">Missed Dose Severity</h2>
+              <h2 className="text-lg font-extrabold tracking-wide text-destructive">{t('dashboard.missedDoseSeverity')}</h2>
             </div>
             {missedDoseInsight?.severity && (
               <span
@@ -604,17 +610,26 @@ const Dashboard = () => {
                     : 'border-success/40 bg-success/15 text-success'
                 }`}
               >
-                {missedDoseInsight.severity}
+                {missedDoseInsight.severity === 'high'
+                  ? t('risk.high')
+                  : missedDoseInsight.severity === 'moderate'
+                  ? t('risk.moderate')
+                  : t('risk.low')}
               </span>
             )}
           </div>
 
           <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-bold uppercase tracking-wide text-destructive">
-            Immediate adherence warning: missed doses can rapidly increase health risk.
+            {t('dashboard.immediateAdherenceWarning')}
           </p>
+          {missedDrugNames && (
+            <p className="mb-3 text-sm font-semibold text-foreground">
+              {t('dashboard.missedMedicines')}: {missedDrugNames}
+            </p>
+          )}
 
           {loadingMissedDoseInsight ? (
-            <p className="text-sm font-medium text-destructive/90">Analyzing missed-dose danger level with Groq...</p>
+            <p className="text-sm font-medium text-destructive/90">{t('dashboard.analyzingMissedDoseDanger')}</p>
           ) : missedDoseInsight ? (
             <>
               <p className="mb-2 text-base font-semibold text-foreground">{missedDoseInsight.summary}</p>
@@ -622,10 +637,10 @@ const Dashboard = () => {
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-bold text-destructive">
                 {missedDoseInsight.riskProgression}
               </p>
-              <p className="mt-2 text-xs font-medium text-muted-foreground">Source: {missedDoseInsight.source}</p>
+              <p className="mt-2 text-xs font-medium text-muted-foreground">{t('common.source')}: {missedDoseInsight.source}</p>
             </>
           ) : (
-            <p className="text-sm text-destructive/90">Groq danger insight is currently unavailable. Please try again shortly.</p>
+            <p className="text-sm text-destructive/90">{t('dashboard.groqDangerUnavailable')}</p>
           )}
         </section>
       )}
