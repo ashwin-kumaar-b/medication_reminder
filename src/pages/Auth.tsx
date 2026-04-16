@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Loader2, Search } from 'lucide-react';
+import { Shield, Loader2, Search, Eye, EyeOff } from 'lucide-react';
 import { useAuth, UiMode, UserRole } from '@/contexts/AuthContext';
 import { attachOneSignalIdentity } from '@/lib/onesignal';
 import { isSupabaseConfigured } from '@/lib/supabase';
@@ -56,6 +56,7 @@ const Auth = () => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [registerStep, setRegisterStep] = useState<1 | 2>(1);
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -288,15 +289,24 @@ const Auth = () => {
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-foreground">Password</label>
-                <input
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  type="password"
-                  required
-                  minLength={8}
-                  className={`${registerFieldClass} ${registerFieldSizeClass}`}
-                  placeholder="At least 8 characters"
-                />
+                <div className="relative">
+                  <input
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    type={showPassword ? "text" : "password"}
+                    required
+                    minLength={8}
+                    className={`${registerFieldClass} ${registerFieldSizeClass} pr-10`}
+                    placeholder="At least 8 characters"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -535,14 +545,23 @@ const Auth = () => {
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-foreground">Password</label>
-                <input
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  type="password"
-                  required
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
-                  placeholder="Minimum 8 characters"
-                />
+                <div className="relative">
+                  <input
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    type={showPassword ? "text" : "password"}
+                    required
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20 pr-10"
+                    placeholder="Minimum 8 characters"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               <div>

@@ -3,7 +3,7 @@ import { Shield, LayoutDashboard, Pill, GitCompareArrows, Apple, Menu, X, LogOut
 import { useAuth, UserRole } from '@/contexts/AuthContext';
 import { useMemo, useState } from 'react';
 
-const navByRole: Record<UserRole, Array<{ to: string; label: string; icon: any }>> = {
+const navByRole: Record<UserRole, Array<{ to: string; label: string; icon: React.ElementType }>> = {
   patient: [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/add-medicine', label: 'Add', icon: PlusCircle },
