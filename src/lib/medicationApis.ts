@@ -78,7 +78,7 @@ const extractGeminiText = (payload: any) => {
     .trim();
 };
 
-  const extractGroqText = (payload: any) => clean(payload?.choices?.[0]?.message?.content);
+const extractGroqText = (payload: any) => clean(payload?.choices?.[0]?.message?.content);
 
 const parseGeminiJson = (raw: string) => {
   const cleaned = raw.replace(/```json|```/gi, '').trim();
@@ -358,6 +358,10 @@ export const inferFoodRiskFromOpenFda = (safety: OpenFdaSafety | null, foodQuery
 export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise<GeminiMedicalAdvice | null> => {
   const prompt = [
     'You are a clinical safety assistant for a medication reminder app.',
+    'Use Evidence lines as high-confidence inputs for your risk assessment.',
+    'You may also use general pharmacology and clinical interaction knowledge when Evidence is sparse.',
+    'If your conclusion is inferred (not directly from Evidence), explicitly state that in explanation.',
+    'Use severity "none" only when there is genuinely no plausible interaction risk.',
     'Return only JSON with this exact shape:',
     '{"severity":"high|moderate|low|safe|none","summary":"...","explanation":"...","recommendations":["..."],"cautions":["..."]}',
     `Context: ${input.context}`,

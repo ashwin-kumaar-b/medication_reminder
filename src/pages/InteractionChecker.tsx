@@ -8,7 +8,7 @@ interface InteractionResult {
   severity: 'high' | 'moderate' | 'low' | 'none';
   description: string;
   drugs: string[];
-  source?: 'RxNav' | 'OpenFDA' | 'Gemini' | 'DDInter';
+  source?: 'RxNav' | 'OpenFDA' | 'Gemini' | 'DDInter' | 'Groq';
 }
 
 const severityConfig = {
@@ -54,50 +54,24 @@ const InteractionChecker = () => {
   const checkPair = async (leftDrug: string, rightDrug: string): Promise<InteractionResult[]> => {
     const supplementsList = parseInputList(supplements);
     const symptomList = parseInputList(symptoms);
-    const [rxcui1, rxcui2] = await Promise.all([getRxCui(leftDrug), getRxCui(rightDrug)]);
-
-    if (!rxcui1 || !rxcui2) {
-      const geminiFallback = await getGeminiMedicalAdvice({
-        context: 'drug-interaction',
-        drugA: leftDrug,
-        drugB: rightDrug,
-        supplements: supplementsList,
-        symptoms: symptomList,
-      });
-
-      if (geminiFallback) {
-        return [
-          {
-            severity: geminiFallback.severity === 'safe' || geminiFallback.severity === 'none' ? 'none' : geminiFallback.severity,
-            description: `${geminiFallback.summary} ${geminiFallback.explanation}`.trim(),
-            drugs: [leftDrug, rightDrug],
-            source: geminiFallback.source,
-          },
-        ];
-      }
-
-      return [
-        {
-          severity: 'moderate',
-          description: `Could not fully resolve RxNorm IDs for ${leftDrug} and ${rightDrug}. Please verify spellings.`,
-          drugs: [leftDrug, rightDrug],
-          source: 'RxNav',
-        },
-      ];
-    }
+    const [rxcui1, rxcui2, ddinterItems, openFdaA, openFdaB] = await Promise.all([
+      getRxCui(leftDrug),
+      getRxCui(rightDrug),
+      getDdinterInteractions(leftDrug, rightDrug),
+      getOpenFdaSafety(leftDrug),
+      getOpenFdaSafety(rightDrug),
+    ]);
 
     const interactions: InteractionResult[] = [];
-    const rxNavItems = await getRxNavInteractions(rxcui1, rxcui2);
+    const rxNavItems = rxcui1 && rxcui2 ? await getRxNavInteractions(rxcui1, rxcui2) : [];
     rxNavItems.forEach(item => {
       interactions.push({ ...item, drugs: [leftDrug, rightDrug], source: 'RxNav' });
     });
 
-    const ddinterItems = await getDdinterInteractions(leftDrug, rightDrug);
     ddinterItems.forEach(item => {
       interactions.push({ ...item, drugs: [leftDrug, rightDrug], source: 'DDInter' });
     });
 
-    const [openFdaA, openFdaB] = await Promise.all([getOpenFdaSafety(leftDrug), getOpenFdaSafety(rightDrug)]);
     const openFdaWarnings = [
       ...(openFdaA?.warnings || []),
       ...(openFdaA?.contraindications || []),
@@ -116,13 +90,21 @@ const InteractionChecker = () => {
       });
     });
 
+    const apiEvidence = [
+      `RxNorm lookup ${leftDrug}: ${rxcui1 || 'not found'}`,
+      `RxNorm lookup ${rightDrug}: ${rxcui2 || 'not found'}`,
+      ...(rxNavItems.length > 0 ? rxNavItems.map(item => `RxNav: ${item.description}`) : ['RxNav: no interaction records found or RxCUI unavailable.']),
+      ...(ddinterItems.length > 0 ? ddinterItems.map(item => `DDInter: ${item.description}`) : ['DDInter: no interaction records returned.']),
+      ...(openFdaWarnings.length > 0 ? openFdaWarnings.map(warning => `OpenFDA: ${warning}`) : ['OpenFDA: no warning or contraindication text returned.']),
+    ].slice(0, 12);
+
     const geminiAdvice = await getGeminiMedicalAdvice({
       context: 'drug-interaction',
       drugA: leftDrug,
       drugB: rightDrug,
       supplements: supplementsList,
       symptoms: symptomList,
-      evidence: [...rxNavItems.map(item => item.description), ...ddinterItems.map(item => item.description), ...openFdaWarnings].slice(0, 8),
+      evidence: apiEvidence,
     });
 
     if (geminiAdvice) {
@@ -136,8 +118,10 @@ const InteractionChecker = () => {
 
     if (interactions.length === 0) {
       interactions.push({
-        severity: 'none',
-        description: `No known interactions found between ${leftDrug} and ${rightDrug}.`,
+        severity: !rxcui1 || !rxcui2 ? 'moderate' : 'none',
+        description: !rxcui1 || !rxcui2
+          ? `Could not fully resolve RxNorm IDs for ${leftDrug} and ${rightDrug}. RxNav coverage is limited; verify spellings and cross-check with a pharmacist.`
+          : `No known interactions found between ${leftDrug} and ${rightDrug}.`,
         drugs: [leftDrug, rightDrug],
         source: 'RxNav',
       });
@@ -175,9 +159,13 @@ const InteractionChecker = () => {
   };
 
   useEffect(() => {
-    if (activeMedicineNames.length >= 2 && !checked && !loading) {
+    if (activeMedicineNames.length >= 2) {
       void handleCheckMyMedicines();
+      return;
     }
+
+    setResults([]);
+    setChecked(false);
   }, [activeMedicineNames]);
 
   const handleCheck = async (e: React.FormEvent) => {
