@@ -1,24 +1,95 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Apple, Loader2, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { useMedicines } from '@/contexts/MedicineContext';
-import { getGeminiMedicalAdvice, getOpenFdaSafety, inferFoodRiskFromOpenFda, parseInputList, searchUsdaFood } from '@/lib/medicationApis';
+import {
+  getFoodNutritionProfileInsight,
+  getGeminiMedicalAdvice,
+  getOpenFdaSafety,
+  inferFoodRiskFromOpenFda,
+  parseInputList,
+  searchUsdaFood,
+  FoodNutritionProfileInsight,
+} from '@/lib/medicationApis';
 import { useAppSettings } from '@/features/settings/SettingsContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 const FoodCheck = () => {
   const { medicines } = useMedicines();
+  const { user } = useAuth();
   const [selectedMed, setSelectedMed] = useState('');
   const [food, setFood] = useState('');
   const [supplements, setSupplements] = useState('');
   const [symptoms, setSymptoms] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingNutrition, setLoadingNutrition] = useState(false);
   const [result, setResult] = useState<{ severity: 'high' | 'moderate' | 'safe'; desc: string; alt: string; source: string } | null>(null);
-  const { t } = useAppSettings();
+  const [nutritionInsight, setNutritionInsight] = useState<FoodNutritionProfileInsight | null>(null);
+  const [nutritionMessage, setNutritionMessage] = useState('');
+  const { t, settings } = useAppSettings();
+
+  const activeMedicineNames = useMemo(
+    () => Array.from(new Set(medicines.filter(item => item.isActive).map(item => item.name).filter(Boolean))),
+    [medicines],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAutomaticNutrition = async () => {
+      const illnessList = user?.illness ? parseInputList(user.illness) : [];
+      const chronicDiseases = (user?.chronicDiseases || []).filter(Boolean);
+      const infectionHistory = (user?.infectionHistory || []).filter(Boolean);
+      const allergyLabels = (user?.allergies || [])
+        .map(entry => `${entry.category}${entry.trigger ? `: ${entry.trigger}` : ''}`)
+        .filter(Boolean);
+
+      const medicinePool = activeMedicineNames.length > 0 ? activeMedicineNames : Array.from(new Set(medicines.map(item => item.name).filter(Boolean)));
+
+      if (medicinePool.length === 0) {
+        if (!cancelled) {
+          setNutritionInsight(null);
+          setNutritionMessage('Add at least one medicine to get automatic nutrition suggestions.');
+          setLoadingNutrition(false);
+        }
+        return;
+      }
+
+      if (!cancelled) {
+        setLoadingNutrition(true);
+        setNutritionMessage('');
+      }
+
+      const advice = await getFoodNutritionProfileInsight({
+        language: settings.language,
+        medicines: medicinePool,
+        illness: illnessList,
+        chronicDiseases,
+        infectionHistory,
+        allergies: allergyLabels,
+      });
+
+      if (cancelled) return;
+
+      setNutritionInsight(advice);
+      setLoadingNutrition(false);
+      if (!advice) {
+        setNutritionMessage('Automatic nutrition suggestions are currently unavailable. Please verify Groq API configuration.');
+      }
+    };
+
+    void loadAutomaticNutrition();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMedicineNames, medicines, settings.language, user]);
 
   const handleCheck = async (e: React.FormEvent) => {
     e.preventDefault();
     const medName = selectedMed || '';
     if (!medName || !food) return;
     setLoading(true);
+    setNutritionInsight(null);
 
     const [foodMatch, openFda] = await Promise.all([
       searchUsdaFood(food),
@@ -30,6 +101,22 @@ const FoodCheck = () => {
     const supplementsList = parseInputList(supplements);
     const symptomList = parseInputList(symptoms);
 
+    const illnessList = user?.illness ? parseInputList(user.illness) : [];
+    const chronicDiseases = (user?.chronicDiseases || []).filter(Boolean);
+    const infectionHistory = (user?.infectionHistory || []).filter(Boolean);
+    const allergyLabels = (user?.allergies || [])
+      .map(entry => `${entry.category}${entry.trigger ? `: ${entry.trigger}` : ''}`)
+      .filter(Boolean);
+
+    const nutritionPromise = getFoodNutritionProfileInsight({
+      language: settings.language,
+      medicines: activeMedicineNames.length > 0 ? activeMedicineNames : [medName],
+      illness: illnessList,
+      chronicDiseases,
+      infectionHistory,
+      allergies: allergyLabels,
+    });
+
     const geminiAdvice = await getGeminiMedicalAdvice({
       context: 'food-compatibility',
       medication: medName,
@@ -38,6 +125,9 @@ const FoodCheck = () => {
       symptoms: symptomList,
       evidence: [inferred.summary, ...(inferred.evidence || [])],
     });
+
+    const nutritionAdvice = await nutritionPromise;
+    setNutritionInsight(nutritionAdvice);
 
     const mappedSeverity = geminiAdvice
       ? geminiAdvice.severity === 'high'
@@ -135,6 +225,92 @@ const FoodCheck = () => {
           </div>
         );
       })()}
+
+      {nutritionInsight && (
+        <div className="mt-5 animate-fade-in rounded-xl border border-primary/25 bg-primary/5 p-5">
+          <div className="mb-2 flex items-center gap-2">
+            <Apple className="h-5 w-5 text-primary" />
+            <h2 className="text-base font-semibold text-foreground">Medication + Disease Nutrition Guidance</h2>
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${
+                nutritionInsight.confidence === 'high'
+                  ? 'bg-success/20 text-success'
+                  : nutritionInsight.confidence === 'medium'
+                    ? 'bg-warning/20 text-warning'
+                    : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {nutritionInsight.confidence} confidence
+            </span>
+          </div>
+          <p className="mb-4 text-sm text-foreground/90">{nutritionInsight.summary}</p>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-lg border border-success/30 bg-success/5 p-3">
+              <p className="mb-2 text-sm font-semibold text-success">Food types to prioritize</p>
+              <ul className="space-y-2 text-sm text-foreground/90">
+                {nutritionInsight.foodTypesToPrioritize.slice(0, 4).map((item, index) => (
+                  <li key={`${item.type}-${index}`}>
+                    <p className="font-semibold">{item.type} <span className="text-xs font-medium opacity-70">({item.confidence})</span></p>
+                    <p>{item.reason}</p>
+                    {item.examples.length > 0 && <p className="text-xs opacity-80">Examples: {item.examples.join(', ')}</p>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
+              <p className="mb-2 text-sm font-semibold text-warning">Food types to limit</p>
+              <ul className="space-y-2 text-sm text-foreground/90">
+                {nutritionInsight.foodTypesToLimit.slice(0, 4).map((item, index) => (
+                  <li key={`${item.type}-${index}`}>
+                    <p className="font-semibold">{item.type} <span className="text-xs font-medium opacity-70">({item.confidence})</span></p>
+                    <p>{item.reason}</p>
+                    {item.examples.length > 0 && <p className="text-xs opacity-80">Examples: {item.examples.join(', ')}</p>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {nutritionInsight.evidenceBasis.length > 0 && (
+            <div className="mt-4 rounded-lg border border-border bg-background p-3">
+              <p className="mb-2 text-sm font-semibold text-foreground">Evidence basis</p>
+              <ul className="space-y-1 text-xs text-foreground/85">
+                {nutritionInsight.evidenceBasis.slice(0, 4).map((line, index) => (
+                  <li key={`${line}-${index}`}>- {line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {nutritionInsight.timingTips.length > 0 && (
+            <div className="mt-4 rounded-lg border border-border bg-background p-3">
+              <p className="mb-2 text-sm font-semibold text-foreground">Meal timing tips with medicines</p>
+              <ul className="space-y-1 text-sm text-foreground/90">
+                {nutritionInsight.timingTips.slice(0, 5).map((tip, index) => (
+                  <li key={`${tip}-${index}`}>- {tip}</li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted-foreground">Source: {nutritionInsight.source}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!nutritionInsight && (loadingNutrition || nutritionMessage) && (
+        <div className="mt-5 animate-fade-in rounded-xl border border-primary/20 bg-primary/5 p-5">
+          <div className="mb-2 flex items-center gap-2">
+            <Apple className="h-5 w-5 text-primary" />
+            <h2 className="text-base font-semibold text-foreground">Medication + Disease Nutrition Guidance</h2>
+          </div>
+          {loadingNutrition ? (
+            <p className="text-sm text-foreground/90">Analyzing medicines and profile to prepare automatic food suggestions...</p>
+          ) : (
+            <p className="text-sm text-foreground/90">{nutritionMessage}</p>
+          )}
+        </div>
+      )}
 
       <p className="mt-6 text-xs text-muted-foreground">Consult healthcare provider if unsure. This system supports adherence tracking and does not replace medical advice.</p>
     </div>
