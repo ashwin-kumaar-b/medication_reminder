@@ -322,7 +322,9 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
     const timestamp = new Date().toISOString();
 
     setLogs(prev => {
-      const existing = prev.find(entry => entry.medicationId === medication.id && entry.date === today);
+      const existing = prev.find(
+        entry => entry.medicationId === medication.id && entry.date === today && entry.scheduledTime === medication.scheduleTime,
+      );
       if (existing) {
         return prev.map(entry =>
           entry.id === existing.id
@@ -358,6 +360,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       .select('*')
       .eq('medication_id', medication.id)
       .eq('date', today)
+      .eq('scheduled_time', medication.scheduleTime)
       .maybeSingle();
 
     if (existing) {
@@ -438,7 +441,9 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
     for (const medication of scoped) {
       const scheduledAt = parseDateTime(today, medication.scheduleTime);
       const lateMinutes = minutesBetween(now, scheduledAt);
-      const currentLog = logs.find(entry => entry.medicationId === medication.id && entry.date === today);
+      const currentLog = logs.find(
+        entry => entry.medicationId === medication.id && entry.date === today && entry.scheduledTime === medication.scheduleTime,
+      );
 
       if (lateMinutes >= 0) {
         await addNotification({
@@ -716,7 +721,9 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       .sort((a, b) => a.scheduleTime.localeCompare(b.scheduleTime));
 
     const todayItems = patientMeds.map(medication => {
-      const log = logs.find(entry => entry.medicationId === medication.id && entry.date === today);
+      const log = logs.find(
+        entry => entry.medicationId === medication.id && entry.date === today && entry.scheduledTime === medication.scheduleTime,
+      );
       const scheduled = parseDateTime(today, medication.scheduleTime);
       const late = Math.max(0, minutesBetween(now, scheduled));
       return { medication, log, status: log?.status || 'pending', minutesLate: late };

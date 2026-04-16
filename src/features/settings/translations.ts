@@ -34,6 +34,10 @@ export type TranslationKey =
   | 'common.thisWeek'
   | 'common.daily'
   | 'common.weekly'
+  | 'common.source'
+  | 'risk.high'
+  | 'risk.moderate'
+  | 'risk.low'
   | 'dashboard.welcomeBack'
   | 'dashboard.overviewToday'
   | 'dashboard.age'
@@ -65,12 +69,25 @@ export type TranslationKey =
   | 'dashboard.remindAgainFive'
   | 'dashboard.noMedicineToTest'
   | 'dashboard.addPendingForPreview'
+  | 'dashboard.missedDoseSeverity'
+  | 'dashboard.immediateAdherenceWarning'
+  | 'dashboard.missedMedicines'
+  | 'dashboard.analyzingMissedDoseDanger'
+  | 'dashboard.groqDangerUnavailable'
   | 'actions.addMedicine'
   | 'actions.addMedicineDesc'
   | 'actions.checkInteractions'
   | 'actions.checkInteractionsDesc'
   | 'actions.canITakeNow'
-  | 'actions.canITakeNowDesc';
+  | 'actions.canITakeNowDesc'
+  | 'interaction.fieldDrug1'
+  | 'interaction.fieldDrug2'
+  | 'interaction.fieldSupplements'
+  | 'interaction.fieldSymptoms'
+  | 'food.fieldMedicine'
+  | 'food.fieldFoodItem'
+  | 'food.fieldSupplements'
+  | 'food.fieldSymptoms';
 
 export const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
   en: {
@@ -107,6 +124,10 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'common.thisWeek': 'This Week',
     'common.daily': 'Daily',
     'common.weekly': 'Weekly',
+    'common.source': 'Source',
+    'risk.high': 'High',
+    'risk.moderate': 'Moderate',
+    'risk.low': 'Low',
     'dashboard.welcomeBack': 'Welcome back',
     'dashboard.overviewToday': "Here's your medication overview for today.",
     'dashboard.age': 'Age',
@@ -138,12 +159,25 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'dashboard.remindAgainFive': 'We will remind you again in 5 minutes.',
     'dashboard.noMedicineToTest': 'No medicine to test',
     'dashboard.addPendingForPreview': 'Add at least one pending medicine to preview reminder overlay.',
+    'dashboard.missedDoseSeverity': 'Missed Dose Severity',
+    'dashboard.immediateAdherenceWarning': 'Immediate adherence warning: missed doses can rapidly increase health risk.',
+    'dashboard.missedMedicines': 'Missed medicines',
+    'dashboard.analyzingMissedDoseDanger': 'Analyzing missed-dose danger level with Groq...',
+    'dashboard.groqDangerUnavailable': 'Groq danger insight is currently unavailable. Please try again shortly.',
     'actions.addMedicine': 'Add Medicine',
     'actions.addMedicineDesc': 'Add a new medication to your list',
     'actions.checkInteractions': 'Check Interactions',
     'actions.checkInteractionsDesc': 'Verify drug safety',
     'actions.canITakeNow': 'Can I Take Now?',
     'actions.canITakeNowDesc': 'Real-time dose safety check',
+    'interaction.fieldDrug1': 'Drug 1',
+    'interaction.fieldDrug2': 'Drug 2',
+    'interaction.fieldSupplements': 'Supplements (optional)',
+    'interaction.fieldSymptoms': 'Symptoms (optional)',
+    'food.fieldMedicine': 'Medicine',
+    'food.fieldFoodItem': 'Food Item',
+    'food.fieldSupplements': 'Supplements (optional)',
+    'food.fieldSymptoms': 'Current Symptoms (optional)',
   },
   es: {
     'app.brand': 'MediGuard AI',
@@ -179,6 +213,10 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'common.thisWeek': 'Esta semana',
     'common.daily': 'Diario',
     'common.weekly': 'Semanal',
+    'common.source': 'Fuente',
+    'risk.high': 'Alto',
+    'risk.moderate': 'Moderado',
+    'risk.low': 'Bajo',
     'dashboard.welcomeBack': 'Bienvenido de nuevo',
     'dashboard.overviewToday': 'Aqui tienes tu resumen de medicamentos de hoy.',
     'dashboard.age': 'Edad',
@@ -210,12 +248,25 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'dashboard.remindAgainFive': 'Te recordaremos de nuevo en 5 minutos.',
     'dashboard.noMedicineToTest': 'No hay medicina para probar',
     'dashboard.addPendingForPreview': 'Agrega al menos una medicina pendiente para probar el recordatorio.',
+    'dashboard.missedDoseSeverity': 'Severidad de dosis perdida',
+    'dashboard.immediateAdherenceWarning': 'Advertencia inmediata de adherencia: omitir dosis puede aumentar rapidamente el riesgo de salud.',
+    'dashboard.missedMedicines': 'Medicamentos omitidos',
+    'dashboard.analyzingMissedDoseDanger': 'Analizando el nivel de peligro por dosis perdidas con Groq...',
+    'dashboard.groqDangerUnavailable': 'La evaluacion de peligro de Groq no esta disponible por ahora. Intentalo de nuevo pronto.',
     'actions.addMedicine': 'Agregar medicina',
     'actions.addMedicineDesc': 'Agrega una nueva medicina a tu lista',
     'actions.checkInteractions': 'Revisar interacciones',
     'actions.checkInteractionsDesc': 'Verificar seguridad de medicamentos',
     'actions.canITakeNow': 'Puedo tomar ahora?',
     'actions.canITakeNowDesc': 'Chequeo de dosis en tiempo real',
+    'interaction.fieldDrug1': 'Farmaco 1',
+    'interaction.fieldDrug2': 'Farmaco 2',
+    'interaction.fieldSupplements': 'Suplementos (opcional)',
+    'interaction.fieldSymptoms': 'Sintomas (opcional)',
+    'food.fieldMedicine': 'Medicamento',
+    'food.fieldFoodItem': 'Alimento',
+    'food.fieldSupplements': 'Suplementos (opcional)',
+    'food.fieldSymptoms': 'Sintomas actuales (opcional)',
   },
   fr: {
     'app.brand': 'MediGuard AI',
@@ -251,6 +302,10 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'common.thisWeek': 'Cette semaine',
     'common.daily': 'Quotidien',
     'common.weekly': 'Hebdomadaire',
+    'common.source': 'Source',
+    'risk.high': 'Eleve',
+    'risk.moderate': 'Modere',
+    'risk.low': 'Faible',
     'dashboard.welcomeBack': 'Bon retour',
     'dashboard.overviewToday': "Voici votre apercu des medicaments pour aujourd'hui.",
     'dashboard.age': 'Age',
@@ -282,12 +337,25 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'dashboard.remindAgainFive': 'Nous vous rappellerons dans 5 minutes.',
     'dashboard.noMedicineToTest': 'Aucun medicament a tester',
     'dashboard.addPendingForPreview': 'Ajoutez au moins un medicament en attente pour tester le rappel.',
+    'dashboard.missedDoseSeverity': 'Severite des doses manquees',
+    'dashboard.immediateAdherenceWarning': 'Alerte immediate d adherence : les doses manquees peuvent rapidement augmenter le risque pour la sante.',
+    'dashboard.missedMedicines': 'Medicaments manques',
+    'dashboard.analyzingMissedDoseDanger': 'Analyse du niveau de danger des doses manquees avec Groq...',
+    'dashboard.groqDangerUnavailable': 'L analyse de danger Groq est indisponible pour le moment. Reessayez bientot.',
     'actions.addMedicine': 'Ajouter medicament',
     'actions.addMedicineDesc': 'Ajouter un nouveau medicament a votre liste',
     'actions.checkInteractions': 'Verifier interactions',
     'actions.checkInteractionsDesc': 'Verifier la securite medicamenteuse',
     'actions.canITakeNow': 'Puis-je prendre maintenant ?',
     'actions.canITakeNowDesc': 'Verification de dose en temps reel',
+    'interaction.fieldDrug1': 'Medicament 1',
+    'interaction.fieldDrug2': 'Medicament 2',
+    'interaction.fieldSupplements': 'Supplements (optionnel)',
+    'interaction.fieldSymptoms': 'Symptomes (optionnel)',
+    'food.fieldMedicine': 'Medicament',
+    'food.fieldFoodItem': 'Aliment',
+    'food.fieldSupplements': 'Supplements (optionnel)',
+    'food.fieldSymptoms': 'Symptomes actuels (optionnel)',
   },
   ta: {
     'app.brand': 'MediGuard AI',
@@ -323,6 +391,10 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'common.thisWeek': 'இந்த வாரம்',
     'common.daily': 'தினசரி',
     'common.weekly': 'வாராந்திரம்',
+    'common.source': 'மூலம்',
+    'risk.high': 'உயர்',
+    'risk.moderate': 'மிதமான',
+    'risk.low': 'குறைந்த',
     'dashboard.welcomeBack': 'மீண்டும் வரவேற்கிறோம்',
     'dashboard.overviewToday': 'இன்றைய மருந்து சுருக்கம் இதோ.',
     'dashboard.age': 'வயது',
@@ -354,12 +426,25 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'dashboard.remindAgainFive': '5 நிமிடத்தில் மீண்டும் நினைவூட்டுவோம்.',
     'dashboard.noMedicineToTest': 'சோதிக்க மருந்து இல்லை',
     'dashboard.addPendingForPreview': 'நினைவூட்டல் சோதனைக்கு குறைந்தது ஒரு நிலுவை மருந்தை சேர்க்கவும்.',
+    'dashboard.missedDoseSeverity': 'தவறிய டோஸ் தீவிரம்',
+    'dashboard.immediateAdherenceWarning': 'உடனடி பின்பற்றல் எச்சரிக்கை: டோஸ் தவறுவது உடல்நல ஆபத்தை விரைவாக அதிகரிக்கலாம்.',
+    'dashboard.missedMedicines': 'தவறிய மருந்துகள்',
+    'dashboard.analyzingMissedDoseDanger': 'Groq மூலம் தவறிய டோஸ் ஆபத்து நிலையை பகுப்பாய்வு செய்கிறோம்...',
+    'dashboard.groqDangerUnavailable': 'Groq ஆபத்து பகுப்பாய்வு தற்போது கிடைக்கவில்லை. சிறிது நேரத்தில் மீண்டும் முயற்சிக்கவும்.',
     'actions.addMedicine': 'மருந்து சேர்க்க',
     'actions.addMedicineDesc': 'உங்கள் பட்டியலில் புதிய மருந்தை சேர்க்கவும்',
     'actions.checkInteractions': 'இணைவு சரிபார்',
     'actions.checkInteractionsDesc': 'மருந்து பாதுகாப்பை சரிபார்க்கவும்',
     'actions.canITakeNow': 'இப்போது எடுத்துக்கலாமா?',
     'actions.canITakeNowDesc': 'நேரடி டோஸ் பாதுகாப்பு சோதனை',
+    'interaction.fieldDrug1': 'மருந்து 1',
+    'interaction.fieldDrug2': 'மருந்து 2',
+    'interaction.fieldSupplements': 'உடனுணவுகள் (விருப்பம்)',
+    'interaction.fieldSymptoms': 'அறிகுறிகள் (விருப்பம்)',
+    'food.fieldMedicine': 'மருந்து',
+    'food.fieldFoodItem': 'உணவு பொருள்',
+    'food.fieldSupplements': 'உடனுணவுகள் (விருப்பம்)',
+    'food.fieldSymptoms': 'தற்போதைய அறிகுறிகள் (விருப்பம்)',
   },
   te: {
     'app.brand': 'MediGuard AI',
@@ -395,6 +480,10 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'common.thisWeek': 'ఈ వారం',
     'common.daily': 'రోజువారీ',
     'common.weekly': 'వారానికొకసారి',
+    'common.source': 'మూలం',
+    'risk.high': 'అధిక',
+    'risk.moderate': 'మధ్యస్థ',
+    'risk.low': 'తక్కువ',
     'dashboard.welcomeBack': 'మళ్లీ స్వాగతం',
     'dashboard.overviewToday': 'ఈరోజు మీ మందుల అవలోకనం ఇది.',
     'dashboard.age': 'వయస్సు',
@@ -426,12 +515,25 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'dashboard.remindAgainFive': 'మేము 5 నిమిషాల తర్వాత మళ్లీ గుర్తు చేస్తాము.',
     'dashboard.noMedicineToTest': 'పరీక్షించడానికి మందు లేదు',
     'dashboard.addPendingForPreview': 'రిమైండర్ ఓవర్లే పరీక్షకు కనీసం ఒక పెండింగ్ మందు జోడించండి.',
+    'dashboard.missedDoseSeverity': 'మిస్ అయిన డోస్ తీవ్రత',
+    'dashboard.immediateAdherenceWarning': 'తక్షణ అనుసరణ హెచ్చరిక: డోస్ మిస్ అవడం ఆరోగ్య ప్రమాదాన్ని వేగంగా పెంచవచ్చు.',
+    'dashboard.missedMedicines': 'మిస్ అయిన మందులు',
+    'dashboard.analyzingMissedDoseDanger': 'Groq తో మిస్ అయిన డోస్ ప్రమాద స్థాయిని విశ్లేషిస్తున్నాం...',
+    'dashboard.groqDangerUnavailable': 'Groq ప్రమాద విశ్లేషణ ప్రస్తుతం అందుబాటులో లేదు. కొంతసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.',
     'actions.addMedicine': 'మందు జోడించు',
     'actions.addMedicineDesc': 'మీ జాబితాలో కొత్త మందు జోడించండి',
     'actions.checkInteractions': 'ఇంటరాక్షన్లు తనిఖీ చేయి',
     'actions.checkInteractionsDesc': 'మందుల భద్రతను నిర్ధారించండి',
     'actions.canITakeNow': 'ఇప్పుడు తీసుకోవాలా?',
     'actions.canITakeNowDesc': 'రియల్ టైమ్ డోస్ భద్రత తనిఖీ',
+    'interaction.fieldDrug1': 'మందు 1',
+    'interaction.fieldDrug2': 'మందు 2',
+    'interaction.fieldSupplements': 'సప్లిమెంట్స్ (ఐచ్చికం)',
+    'interaction.fieldSymptoms': 'లక్షణాలు (ఐచ్చికం)',
+    'food.fieldMedicine': 'మందు',
+    'food.fieldFoodItem': 'ఆహార పదార్థం',
+    'food.fieldSupplements': 'సప్లిమెంట్స్ (ఐచ్చికం)',
+    'food.fieldSymptoms': 'ప్రస్తుత లక్షణాలు (ఐచ్చికం)',
   },
   hi: {
     'app.brand': 'MediGuard AI',
@@ -467,6 +569,10 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'common.thisWeek': 'इस सप्ताह',
     'common.daily': 'दैनिक',
     'common.weekly': 'साप्ताहिक',
+    'common.source': 'स्रोत',
+    'risk.high': 'उच्च',
+    'risk.moderate': 'मध्यम',
+    'risk.low': 'कम',
     'dashboard.welcomeBack': 'वापसी पर स्वागत है',
     'dashboard.overviewToday': 'आज की आपकी दवा जानकारी यहां है।',
     'dashboard.age': 'आयु',
@@ -498,11 +604,24 @@ export const translations: Record<AppLanguage, Record<TranslationKey, string>> =
     'dashboard.remindAgainFive': 'हम 5 मिनट बाद फिर याद दिलाएंगे।',
     'dashboard.noMedicineToTest': 'टेस्ट के लिए दवा नहीं है',
     'dashboard.addPendingForPreview': 'रिमाइंडर ओवरले टेस्ट के लिए कम से कम एक लंबित दवा जोड़ें।',
+    'dashboard.missedDoseSeverity': 'छूटी हुई डोज की गंभीरता',
+    'dashboard.immediateAdherenceWarning': 'तत्काल अनुपालन चेतावनी: डोज छूटना स्वास्थ्य जोखिम को तेजी से बढ़ा सकता है।',
+    'dashboard.missedMedicines': 'छूटी हुई दवाएं',
+    'dashboard.analyzingMissedDoseDanger': 'Groq के साथ छूटी हुई डोज के खतरे का विश्लेषण किया जा रहा है...',
+    'dashboard.groqDangerUnavailable': 'Groq खतरा विश्लेषण अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद फिर प्रयास करें।',
     'actions.addMedicine': 'दवा जोड़ें',
     'actions.addMedicineDesc': 'अपनी सूची में नई दवा जोड़ें',
     'actions.checkInteractions': 'इंटरैक्शन जांचें',
     'actions.checkInteractionsDesc': 'दवा सुरक्षा जांचें',
     'actions.canITakeNow': 'क्या अभी ले सकता हूं?',
     'actions.canITakeNowDesc': 'रीयल-टाइम डोज सुरक्षा जांच',
+    'interaction.fieldDrug1': 'दवा 1',
+    'interaction.fieldDrug2': 'दवा 2',
+    'interaction.fieldSupplements': 'सप्लीमेंट्स (वैकल्पिक)',
+    'interaction.fieldSymptoms': 'लक्षण (वैकल्पिक)',
+    'food.fieldMedicine': 'दवा',
+    'food.fieldFoodItem': 'खाद्य पदार्थ',
+    'food.fieldSupplements': 'सप्लीमेंट्स (वैकल्पिक)',
+    'food.fieldSymptoms': 'वर्तमान लक्षण (वैकल्पिक)',
   },
 };

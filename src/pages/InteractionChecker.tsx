@@ -2,7 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { GitCompareArrows, Loader2, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useMedicines } from '@/contexts/MedicineContext';
-import { getDdinterInteractions, getGeminiMedicalAdvice, getOpenFdaSafety, getRxCui, getRxNavInteractions, parseInputList } from '@/lib/medicationApis';
+import {
+  getDdinterInteractions,
+  getDrugAllergyProfileInsight,
+  getGeminiMedicalAdvice,
+  getOpenFdaSafety,
+  getRxCui,
+  getRxNavInteractions,
+  parseInputList,
+  DrugAllergyProfileInsight,
+} from '@/lib/medicationApis';
+import { useAppSettings } from '@/features/settings/SettingsContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface InteractionResult {
   severity: 'high' | 'moderate' | 'low' | 'none';
@@ -20,14 +31,18 @@ const severityConfig = {
 
 const InteractionChecker = () => {
   const { medicines } = useMedicines();
+  const { user } = useAuth();
   const [drug1, setDrug1] = useState('');
   const [drug2, setDrug2] = useState('');
   const [supplements, setSupplements] = useState('');
   const [symptoms, setSymptoms] = useState('');
   const [loading, setLoading] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileInsight, setProfileInsight] = useState<DrugAllergyProfileInsight | null>(null);
   const [results, setResults] = useState<InteractionResult[]>([]);
   const [checked, setChecked] = useState(false);
   const { toast } = useToast();
+  const { t, settings } = useAppSettings();
 
   const activeMedicineNames = useMemo(() => {
     const unique = new Map<string, string>();
@@ -185,6 +200,28 @@ const InteractionChecker = () => {
     setLoading(false);
   };
 
+  const handleAnalyzeProfileRisk = async () => {
+    if (activeMedicineNames.length === 0) {
+      toast({ title: 'No active medicines', description: 'Add active medicines to run drug-allergy profile analysis.', variant: 'destructive' });
+      return;
+    }
+
+    setProfileLoading(true);
+    const insight = await getDrugAllergyProfileInsight({
+      language: settings.language,
+      medicines: activeMedicineNames,
+      chronicDiseases: user?.chronicDiseases,
+      infectionHistory: user?.infectionHistory,
+      allergies: user?.allergies,
+    });
+    setProfileInsight(insight);
+    setProfileLoading(false);
+
+    if (!insight) {
+      toast({ title: 'Profile analysis unavailable', description: 'Could not generate profile interaction analysis right now.', variant: 'destructive' });
+    }
+  };
+
   return (
     <div className="container mx-auto max-w-2xl px-4 py-8">
       <div className="mb-6 animate-fade-in">
@@ -195,14 +232,24 @@ const InteractionChecker = () => {
       <div className="mb-6 animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">Your Active Medicines</h2>
-          <button
-            type="button"
-            onClick={() => void handleCheckMyMedicines()}
-            disabled={loading || activeMedicineNames.length < 2}
-            className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
-          >
-            Recheck All
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void handleAnalyzeProfileRisk()}
+              disabled={profileLoading || activeMedicineNames.length === 0}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {profileLoading ? 'Analyzing Profile...' : 'Analyze Drug-Allergy Risk'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleCheckMyMedicines()}
+              disabled={loading || activeMedicineNames.length < 2}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              Recheck All
+            </button>
+          </div>
         </div>
         {activeMedicineNames.length === 0 ? (
           <p className="text-sm text-muted-foreground">No active medicines found. Add medicines first to enable automatic interaction checks.</p>
@@ -216,6 +263,47 @@ const InteractionChecker = () => {
         {activeMedicineNames.length === 1 && (
           <p className="mt-3 text-xs text-muted-foreground">At least two active medicines are needed for interaction checks.</p>
         )}
+
+        {profileInsight && (
+          <div className="mt-4 rounded-xl border border-warning/30 bg-warning/5 p-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-foreground">Drug-Allergy & Profile Interaction Insight</h3>
+              <span
+                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase ${
+                  profileInsight.overallRisk === 'high'
+                    ? 'bg-destructive/15 text-destructive'
+                    : profileInsight.overallRisk === 'moderate'
+                    ? 'bg-warning/20 text-warning'
+                    : profileInsight.overallRisk === 'low'
+                    ? 'bg-primary/15 text-primary'
+                    : 'bg-success/15 text-success'
+                }`}
+              >
+                {profileInsight.overallRisk}
+              </span>
+            </div>
+            <p className="mb-2 text-sm text-foreground">{profileInsight.summary}</p>
+            {profileInsight.findings.length > 0 && (
+              <div className="space-y-2">
+                {profileInsight.findings.map((finding, index) => (
+                  <div key={`${finding.title}-${index}`} className="rounded-md border border-border bg-card p-3">
+                    <p className="text-sm font-semibold text-foreground">{finding.title}</p>
+                    <p className="text-sm text-muted-foreground">{finding.detail}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Evidence: {finding.evidence}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {profileInsight.recommendations.length > 0 && (
+              <ul className="mt-3 list-disc pl-5 text-sm text-muted-foreground">
+                {profileInsight.recommendations.map((item, index) => (
+                  <li key={`${item}-${index}`}>{item}</li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-2 text-xs text-muted-foreground">Source: {profileInsight.source}</p>
+          </div>
+        )}
       </div>
 
       <div className="mb-6 animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
@@ -223,19 +311,19 @@ const InteractionChecker = () => {
         <form onSubmit={handleCheck} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">Drug 1</label>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">{t('interaction.fieldDrug1')}</label>
               <input value={drug1} onChange={e => setDrug1(e.target.value)} required placeholder="e.g., Warfarin"
                 className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20" />
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">Drug 2</label>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">{t('interaction.fieldDrug2')}</label>
               <input value={drug2} onChange={e => setDrug2(e.target.value)} required placeholder="e.g., Aspirin"
                 className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20" />
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">Supplements (optional)</label>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">{t('interaction.fieldSupplements')}</label>
               <input
                 value={supplements}
                 onChange={e => setSupplements(e.target.value)}
@@ -244,7 +332,7 @@ const InteractionChecker = () => {
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">Symptoms (optional)</label>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">{t('interaction.fieldSymptoms')}</label>
               <input
                 value={symptoms}
                 onChange={e => setSymptoms(e.target.value)}
