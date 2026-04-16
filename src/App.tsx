@@ -17,39 +17,44 @@ import InteractionChecker from "@/pages/InteractionChecker";
 import FoodCheck from "@/pages/FoodCheck";
 import CanITake from "@/pages/CanITake";
 import MissedDoses from "@/pages/MissedDoses";
+import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
+import { SettingsProvider } from "@/features/settings/SettingsContext";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <MedicineProvider>
-        <TooltipProvider>
-          <Toaster />
-          <BrowserRouter>
-            <div className="flex min-h-screen flex-col">
-              <Navbar />
-              <main className="flex-1">
-                <Routes>
-                  <Route path="/" element={<Landing />} />
-                  <Route path="/auth" element={<Auth />} />
-                  <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-                  <Route path="/add-medicine" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><AddMedicine /></ProtectedRoute>} />
-                  <Route path="/edit-medicine/:id" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><EditMedicine /></ProtectedRoute>} />
-                  <Route path="/medicines" element={<ProtectedRoute><Medicines /></ProtectedRoute>} />
-                  <Route path="/interaction-checker" element={<ProtectedRoute><InteractionChecker /></ProtectedRoute>} />
-                  <Route path="/food-check" element={<ProtectedRoute><FoodCheck /></ProtectedRoute>} />
-                  <Route path="/can-i-take" element={<ProtectedRoute allowRoles={['patient']}><CanITake /></ProtectedRoute>} />
-                  <Route path="/missed-doses" element={<ProtectedRoute allowRoles={['patient']}><MissedDoses /></ProtectedRoute>} />
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </main>
-              <Footer />
-            </div>
-          </BrowserRouter>
-        </TooltipProvider>
-      </MedicineProvider>
+      <SettingsProvider>
+        <MedicineProvider>
+          <TooltipProvider>
+            <Toaster />
+            <BrowserRouter>
+              <div className="flex min-h-screen flex-col">
+                <Navbar />
+                <main className="flex-1">
+                  <Routes>
+                    <Route path="/" element={<Landing />} />
+                    <Route path="/auth" element={<Auth />} />
+                    <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                    <Route path="/add-medicine" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><AddMedicine /></ProtectedRoute>} />
+                    <Route path="/edit-medicine/:id" element={<ProtectedRoute allowRoles={['patient', 'caretaker']}><EditMedicine /></ProtectedRoute>} />
+                    <Route path="/medicines" element={<ProtectedRoute><Medicines /></ProtectedRoute>} />
+                    <Route path="/interaction-checker" element={<ProtectedRoute><InteractionChecker /></ProtectedRoute>} />
+                    <Route path="/food-check" element={<ProtectedRoute><FoodCheck /></ProtectedRoute>} />
+                    <Route path="/can-i-take" element={<ProtectedRoute allowRoles={['patient']}><CanITake /></ProtectedRoute>} />
+                    <Route path="/missed-doses" element={<ProtectedRoute allowRoles={['patient']}><MissedDoses /></ProtectedRoute>} />
+                    <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </main>
+                <Footer />
+              </div>
+            </BrowserRouter>
+          </TooltipProvider>
+        </MedicineProvider>
+      </SettingsProvider>
     </AuthProvider>
   </QueryClientProvider>
 );

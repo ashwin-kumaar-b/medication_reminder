@@ -4,9 +4,11 @@ import { useAuth, UiMode } from '@/contexts/AuthContext';
 import { useMedicines } from '@/contexts/MedicineContext';
 import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, HelpCircle, XCircle, BellRing } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAppSettings } from '@/features/settings/SettingsContext';
 
 const Dashboard = () => {
   const { user, createPatientForCaretaker, getLinkedPatients } = useAuth();
+  const { settings } = useAppSettings();
   const { medicines, logs, getCaretakerDashboardData, getPatientDashboardData, markDoseStatus } = useMedicines();
   const { toast } = useToast();
   const [selectedPatientId, setSelectedPatientId] = useState('');
@@ -108,9 +110,17 @@ const Dashboard = () => {
 
       const oscillator = context.createOscillator();
       const gain = context.createGain();
-      oscillator.type = 'sine';
-      oscillator.frequency.value = 880;
-      gain.gain.value = 0.08;
+      if (settings.notificationSound === 'soft') {
+        oscillator.type = 'triangle';
+        oscillator.frequency.value = 620;
+      } else if (settings.notificationSound === 'urgent') {
+        oscillator.type = 'square';
+        oscillator.frequency.value = 960;
+      } else {
+        oscillator.type = 'sine';
+        oscillator.frequency.value = 880;
+      }
+      gain.gain.value = settings.notificationVolume;
       oscillator.connect(gain);
       gain.connect(context.destination);
       oscillator.start();
@@ -132,7 +142,7 @@ const Dashboard = () => {
     playBeep();
     alarmTimerRef.current = window.setInterval(() => {
       playBeep();
-    }, 1300);
+    }, settings.notificationSound === 'urgent' ? 800 : 1300);
   };
 
   const closeAlarm = () => {
@@ -234,7 +244,7 @@ const Dashboard = () => {
     return () => {
       stopAlarm();
     };
-  }, []);
+  }, [settings.notificationSound]);
 
   if (user?.role === 'caretaker') {
     return (

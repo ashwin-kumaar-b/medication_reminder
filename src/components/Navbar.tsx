@@ -1,29 +1,34 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Shield, LayoutDashboard, Pill, GitCompareArrows, Apple, Menu, X, LogOut, PlusCircle, Timer, AlertOctagon } from 'lucide-react';
+import { Shield, LayoutDashboard, Pill, GitCompareArrows, Apple, Menu, X, LogOut, PlusCircle, Timer, AlertOctagon, Settings as SettingsIcon } from 'lucide-react';
 import { useAuth, UserRole } from '@/contexts/AuthContext';
 import { useMemo, useState } from 'react';
+import { useAppSettings } from '@/features/settings/SettingsContext';
+import { TranslationKey } from '@/features/settings/translations';
 
-const navByRole: Record<UserRole, Array<{ to: string; label: string; icon: React.ElementType }>> = {
+const navByRole: Record<UserRole, Array<{ to: string; labelKey: TranslationKey; icon: React.ElementType }>> = {
   patient: [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/add-medicine', label: 'Add', icon: PlusCircle },
-    { to: '/medicines', label: 'Medicines', icon: Pill },
-    { to: '/interaction-checker', label: 'Interactions', icon: GitCompareArrows },
-    { to: '/food-check', label: 'Food Check', icon: Apple },
-    { to: '/can-i-take', label: 'Can I Take', icon: Timer },
-    { to: '/missed-doses', label: 'Missed Doses', icon: AlertOctagon },
+    { to: '/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard },
+    { to: '/add-medicine', labelKey: 'nav.add', icon: PlusCircle },
+    { to: '/medicines', labelKey: 'nav.medicines', icon: Pill },
+    { to: '/interaction-checker', labelKey: 'nav.interactions', icon: GitCompareArrows },
+    { to: '/food-check', labelKey: 'nav.foodCheck', icon: Apple },
+    { to: '/can-i-take', labelKey: 'nav.canITake', icon: Timer },
+    { to: '/missed-doses', labelKey: 'nav.missedDoses', icon: AlertOctagon },
+    { to: '/settings', labelKey: 'nav.settings', icon: SettingsIcon },
   ],
   caretaker: [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/add-medicine', label: 'Add for Patient', icon: PlusCircle },
-    { to: '/medicines', label: 'Patient Medicines', icon: Pill },
-    { to: '/interaction-checker', label: 'Interactions', icon: GitCompareArrows },
-    { to: '/food-check', label: 'Food Check', icon: Apple },
+    { to: '/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard },
+    { to: '/add-medicine', labelKey: 'nav.addForPatient', icon: PlusCircle },
+    { to: '/medicines', labelKey: 'nav.patientMedicines', icon: Pill },
+    { to: '/interaction-checker', labelKey: 'nav.interactions', icon: GitCompareArrows },
+    { to: '/food-check', labelKey: 'nav.foodCheck', icon: Apple },
+    { to: '/settings', labelKey: 'nav.settings', icon: SettingsIcon },
   ],
 };
 
 const Navbar = () => {
   const { isAuthenticated, logout, user } = useAuth();
+  const { t } = useAppSettings();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -44,13 +49,13 @@ const Navbar = () => {
           <div className="gradient-primary rounded-lg p-1.5">
             <Shield className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className="text-lg font-bold text-foreground">MediGuard AI</span>
+          <span className="text-lg font-bold text-foreground">{t('app.brand')}</span>
         </Link>
 
         {isAuthenticated && (
           <>
             <div className="hidden items-center gap-1 md:flex">
-              {navItems.map(({ to, label, icon: Icon }) => (
+              {navItems.map(({ to, labelKey, icon: Icon }) => (
                 <Link
                   key={to}
                   to={to}
@@ -61,14 +66,14 @@ const Navbar = () => {
                   }`}
                 >
                   <Icon className="h-4 w-4" />
-                  {label}
+                  {t(labelKey)}
                 </Link>
               ))}
             </div>
             <div className="hidden md:flex">
               <button onClick={handleLogout} className="flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <LogOut className="h-4 w-4" />
-                Logout
+                {t('auth.logout')}
               </button>
             </div>
             <button className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
@@ -79,22 +84,22 @@ const Navbar = () => {
 
         {!isAuthenticated && (
           <Link to="/auth" className="gradient-primary rounded-lg px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">
-            Sign In
+            {t('auth.signIn')}
           </Link>
         )}
       </div>
 
       {mobileOpen && isAuthenticated && (
         <div className="border-t border-border bg-card p-4 md:hidden">
-          {navItems.map(({ to, label, icon: Icon }) => (
+          {navItems.map(({ to, labelKey, icon: Icon }) => (
             <Link key={to} to={to} onClick={() => setMobileOpen(false)} className="flex items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted">
               <Icon className="h-4 w-4" />
-              {label}
+              {t(labelKey)}
             </Link>
           ))}
           <button onClick={handleLogout} className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-destructive hover:bg-muted">
             <LogOut className="h-4 w-4" />
-            Logout
+            {t('auth.logout')}
           </button>
         </div>
       )}
