@@ -6,6 +6,14 @@ const SettingsPanel = () => {
   const { settings, setLanguage, setNotificationSound, setNotificationVolume, t } = useAppSettings();
   const audioContextRef = useRef<AudioContext | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const languageOptions: Array<{ value: AppLanguage; label: string }> = [
+    { value: 'en', label: 'English' },
+    { value: 'es', label: 'Espanol' },
+    { value: 'fr', label: 'Francais' },
+    { value: 'ta', label: 'Tamil' },
+    { value: 'te', label: 'Telugu' },
+    { value: 'hi', label: 'Hindi' },
+  ];
 
   const playPreview = () => {
     if (settings.notificationSound === 'cherie') {
@@ -68,12 +76,11 @@ const SettingsPanel = () => {
             onChange={e => setLanguage(e.target.value as AppLanguage)}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground"
           >
-            <option value="en">{t('settings.english')}</option>
-            <option value="es">{t('settings.spanish')}</option>
-            <option value="fr">{t('settings.french')}</option>
-            <option value="ta">{t('settings.tamil')}</option>
-            <option value="te">{t('settings.telugu')}</option>
-            <option value="hi">{t('settings.hindi')}</option>
+            {languageOptions.map(option => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </div>
 
