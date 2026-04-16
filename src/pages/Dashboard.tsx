@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, UiMode } from '@/contexts/AuthContext';
 import { useMedicines } from '@/contexts/MedicineContext';
-import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, HelpCircle, XCircle, BellRing } from 'lucide-react';
+import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, HelpCircle, XCircle, BellRing, Copy } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { getMissedDoseSeverityInsight, MissedDoseSeverityInsight } from '@/lib/medicationApis';
@@ -546,7 +546,24 @@ const Dashboard = () => {
       {/* Welcome */}
       <div className="mb-8 animate-fade-in">
         <h1 className="text-2xl font-bold text-foreground">{t('dashboard.welcomeBack')}, {user?.name || 'User'} 👋</h1>
-        <p className="text-muted-foreground">{t('dashboard.overviewToday')}</p>
+        
+        {user?.role === 'patient' && user?.patientId && (
+          <div className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground opacity-80 transition-opacity hover:opacity-100">
+            <span>Patient ID: <strong className="text-foreground">{user.patientId}</strong></span>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(user.patientId!);
+                toast({ title: 'ID Copied', description: 'Patient ID copied to clipboard.', duration: 2000 });
+              }}
+              className="rounded p-1 transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Copy Patient ID"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        <p className="mt-1 text-muted-foreground">{t('dashboard.overviewToday')}</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {t('dashboard.age')}: {user?.age ?? 'N/A'} • {t('dashboard.condition')}: {user?.illness || t('dashboard.notSpecified')} • {t('dashboard.interface')}: {user?.uiMode || 'younger'}
         </p>

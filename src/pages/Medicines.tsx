@@ -1,11 +1,30 @@
+import { useMemo, useState } from 'react';
 import { useMedicines } from '@/contexts/MedicineContext';
 import { useToast } from '@/hooks/use-toast';
 import { Pill, Trash2, Clock, Plus, Pencil } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const Medicines = () => {
-  const { medicines, removeMedicine } = useMedicines();
+  const { medicines, removeMedicine, medications } = useMedicines();
+  const { user, getLinkedPatients } = useAuth();
   const { toast } = useToast();
+  const [searchParams] = useSearchParams();
+  const linkedPatients = useMemo(() => getLinkedPatients(user?.id), [getLinkedPatients, user?.id]);
+  const defaultPatientId = user?.role === 'patient' ? user.id : (searchParams.get('patientId') || (linkedPatients.length > 0 ? linkedPatients[0].id : ''));
+  const [selectedPatientId, setSelectedPatientId] = useState<string>(defaultPatientId);
+
+  const displayedMedicines = useMemo(() => {
+    if (user?.role === 'patient') return medicines;
+    
+    // For caretakers, filter medicines by the selected patient
+    return medicines.filter((legacyMed) => {
+        // Need to find the underlying Medication object to get the patientId
+        const med = medications.find(m => m.id === legacyMed.id);
+        return med && med.patientId === selectedPatientId;
+    });
+  }, [medicines, medications, user?.role, selectedPatientId]);
 
   const handleDelete = (id: string, name: string) => {
     removeMedicine(id);
@@ -14,26 +33,41 @@ const Medicines = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {user?.role === 'caretaker' && (
+        <div className="mb-6">
+          <label className="mb-1.5 block text-sm font-medium text-foreground">Select Patient</label>
+          <Select value={selectedPatientId} onValueChange={(val) => setSelectedPatientId(val)}>
+            <SelectTrigger className="w-full sm:w-64 rounded-xl text-sm font-medium">
+              <SelectValue placeholder="Select patient" />
+            </SelectTrigger>
+            <SelectContent>
+              {linkedPatients.map(patient => (
+                <SelectItem key={patient.id} value={patient.id}>{patient.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">My Medicines</h1>
           <p className="text-muted-foreground">Manage your medication list</p>
         </div>
-        <Link to="/add-medicine" className="gradient-primary inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90">
+        <Link to={`/add-medicine${user?.role === 'caretaker' ? `?patientId=${selectedPatientId}` : ''}`} className="gradient-primary inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90">
           <Plus className="h-4 w-4" /> Add New
         </Link>
       </div>
 
-      {medicines.length === 0 ? (
+      {displayedMedicines.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card py-16">
           <Pill className="mb-4 h-12 w-12 text-muted-foreground/40" />
           <p className="mb-2 text-lg font-semibold text-muted-foreground">No medicines yet</p>
           <p className="mb-4 text-sm text-muted-foreground">Add your first medication to get started.</p>
-          <Link to="/add-medicine" className="gradient-primary rounded-lg px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">Add Medicine</Link>
+          <Link to={`/add-medicine${user?.role === 'caretaker' ? `?patientId=${selectedPatientId}` : ''}`} className="gradient-primary rounded-lg px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90">Add Medicine</Link>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {medicines.map((med, i) => (
+          {displayedMedicines.map((med, i) => (
             <div key={med.id} className="animate-fade-in rounded-xl border border-border bg-card p-5 shadow-card transition-all hover:shadow-elevated" style={{ animationDelay: `${i * 0.05}s` }}>
               <div className="mb-3 flex items-start justify-between">
                 <div className="flex items-center gap-3">

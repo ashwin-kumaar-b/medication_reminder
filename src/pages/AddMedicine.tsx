@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -125,11 +125,16 @@ type WizardStep = 1 | 2 | 3;
 
 const AddMedicine = () => {
   const { addMedication } = useMedicines();
-  const { user } = useAuth();
+  const { user, getLinkedPatients } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const linkedPatients = useMemo(() => getLinkedPatients(user?.id), [getLinkedPatients, user?.id]);
+  const defaultPatientId = user?.role === 'patient' ? user.id : (searchParams.get('patientId') || (linkedPatients.length > 0 ? linkedPatients[0].id : null));
 
   const [step, setStep] = useState<WizardStep>(1);
+  const [formPatientId, setFormPatientId] = useState<string | null>(defaultPatientId);
+
   const [loading, setLoading] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ name: string; rxcui: string; type?: 'brand' | 'generic' }>>([]);
@@ -376,8 +381,7 @@ const AddMedicine = () => {
   const submitMedication = async () => {
     if (!user) return;
 
-    const patientId = user.role === 'patient' ? user.id : user.linkedPatientId;
-    if (!patientId) {
+    if (!formPatientId) {
       toast({
         title: 'No linked patient',
         description: 'Caretaker accounts need at least one linked patient before adding medications.',
@@ -402,7 +406,7 @@ const AddMedicine = () => {
     const frequency = deriveFrequency();
     const addPromises = selectedSlotDetails.map(slot =>
       addMedication({
-        patientId,
+        patientId: formPatientId,
         drugName: form.name.trim(),
         dosage,
         photoUrl: form.photoUrl || undefined,
@@ -445,8 +449,8 @@ const AddMedicine = () => {
   return (
     <>
       <div className="container mx-auto max-w-2xl px-4 py-8">
-        <Link to="/dashboard" className="mb-4 inline-flex min-h-12 items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Back to Dashboard
+        <Link to={user?.role === 'caretaker' ? '/caretaker' : '/dashboard'} className="mb-4 inline-flex min-h-12 items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back to {user?.role === 'caretaker' ? 'Portal' : 'Dashboard'}
         </Link>
 
         <div className="animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
@@ -473,6 +477,22 @@ const AddMedicine = () => {
           <form onSubmit={handleWizardSubmit} className="space-y-5">
             {step === 1 && (
               <div className="space-y-5">
+              
+                {user?.role === 'caretaker' && (
+                  <div className="mb-4">
+                    <label className="mb-1.5 block text-sm font-medium text-foreground">Select Patient</label>
+                    <Select value={formPatientId || ''} onValueChange={(val) => setFormPatientId(val)}>
+                      <SelectTrigger className="min-h-[48px] w-full rounded-xl text-sm font-medium">
+                        <SelectValue placeholder="Select patient" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {linkedPatients.map(patient => (
+                          <SelectItem key={patient.id} value={patient.id}>{patient.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
                     <span>Personal details</span>

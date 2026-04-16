@@ -17,7 +17,7 @@ const navByRole: Record<UserRole, Array<{ to: string; labelKey: TranslationKey; 
     { to: '/settings', labelKey: 'nav.settings', icon: SettingsIcon },
   ],
   caretaker: [
-    { to: '/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard },
+    { to: '/caretaker', labelKey: 'nav.dashboard', icon: LayoutDashboard },
     { to: '/add-medicine', labelKey: 'nav.addForPatient', icon: PlusCircle },
     { to: '/medicines', labelKey: 'nav.patientMedicines', icon: Pill },
     { to: '/interaction-checker', labelKey: 'nav.interactions', icon: GitCompareArrows },

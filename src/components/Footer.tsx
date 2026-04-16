@@ -7,7 +7,7 @@ const Footer = () => {
 
   const links = user?.role === 'caretaker'
     ? [
-        { to: '/dashboard', label: 'Caretaker Dashboard' },
+        { to: '/caretaker', label: 'Caretaker Dashboard' },
         { to: '/medicines', label: 'Patient Medicines' },
         { to: '/interaction-checker', label: 'Interaction Check' },
       ]
