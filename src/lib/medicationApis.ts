@@ -123,6 +123,31 @@ export interface DrugAllergyProfileInsight {
   source: 'Groq';
 }
 
+export interface FoodNutritionProfileInput {
+  language?: 'en' | 'es' | 'fr' | 'ta' | 'te' | 'hi';
+  medicines: string[];
+  illness?: string[];
+  chronicDiseases?: string[];
+  infectionHistory?: string[];
+  allergies?: string[];
+}
+
+export interface FoodNutritionProfileInsight {
+  summary: string;
+  foodTypesToPrioritize: Array<{
+    type: string;
+    reason: string;
+    examples: string[];
+  }>;
+  foodTypesToLimit: Array<{
+    type: string;
+    reason: string;
+    examples: string[];
+  }>;
+  timingTips: string[];
+  source: 'Groq';
+}
+
 const clean = (value?: string) => (value || '').replace(/\s+/g, ' ').trim();
 
 const splitCsv = (value?: string) =>
@@ -619,6 +644,12 @@ export const getMissedDoseSeverityInsight = async (
     'Assess missed-dose severity for a patient using the provided missed medication list.',
     'Provide practical and direct wording for a patient dashboard.',
     'Summary must explicitly mention at least one exact missed drug name from the Missed meds list.',
+    'Do NOT mention any medicine name that is not present in Missed meds list.',
+    'If a medicine name is not in Missed meds list, never generate it.',
+    'Guidance must explain the likely near-term health effects of missing this specific dose.',
+    'Guidance should describe effects (for example symptom worsening, reduced control, rebound risk), not only generic advice.',
+    'Do not use guidance to tell the user to take the missed dose now or resume schedule.',
+    'If symptoms are uncertain, state uncertainty and describe the most likely effect conservatively.',
     'You MUST include a progression statement with an estimate of how many additional misses could worsen condition control.',
     'If uncertain, give a conservative estimate and mention uncertainty in guidance.',
     `Write summary, guidance, and riskProgression in ${outputLanguage}.`,
@@ -669,7 +700,9 @@ export const getMissedDoseSeverityInsight = async (
     return {
       severity: normalizeSeverity(parsed.severity),
       summary: clean(parsed.summary) || 'Missed doses may increase your near-term health risk.',
-      guidance: clean(parsed.guidance) || 'Please follow your medication schedule and contact your clinician if misses continue.',
+      guidance:
+        clean(parsed.guidance) ||
+        'Missing this dose may reduce short-term control of your condition and increase risk of symptom worsening.',
       riskProgression: clean(parsed.riskProgression) || 'Further missed doses may worsen control of your condition.',
       missesUntilWorse:
         typeof rawMissesUntilWorse === 'number' && Number.isFinite(rawMissesUntilWorse) && rawMissesUntilWorse >= 0
@@ -881,6 +914,99 @@ export const getDrugAllergyProfileInsight = async (
       summary: clean(parsed.summary) || 'No major profile-based interaction signal was detected from provided data.',
       findings,
       recommendations,
+      source: 'Groq',
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const getFoodNutritionProfileInsight = async (
+  input: FoodNutritionProfileInput,
+): Promise<FoodNutritionProfileInsight | null> => {
+  if (!GROQ_API_KEY || input.medicines.length === 0) return null;
+
+  const languageNameByCode: Record<NonNullable<FoodNutritionProfileInput['language']>, string> = {
+    en: 'English',
+    es: 'Spanish',
+    fr: 'French',
+    ta: 'Tamil',
+    te: 'Telugu',
+    hi: 'Hindi',
+  };
+  const outputLanguage = languageNameByCode[input.language || 'en'] || 'English';
+
+  const illnesses = (input.illness || []).map(item => clean(item)).filter(Boolean);
+  const chronicDiseases = (input.chronicDiseases || []).map(item => clean(item)).filter(Boolean);
+  const infectionHistory = (input.infectionHistory || []).map(item => clean(item)).filter(Boolean);
+  const allergies = (input.allergies || []).map(item => clean(item)).filter(Boolean);
+
+  const prompt = [
+    'You are a medication-aware clinical nutrition assistant.',
+    'Task: provide practical food-type recommendations based on current medicines and disease profile.',
+    'Focus on food categories and nutrition strategy (for example: complex carbohydrates, fiber, vitamin E-rich foods, potassium-rich foods, protein quality, hydration).',
+    'Avoid fabricated contraindications. If uncertain, state uncertainty conservatively.',
+    'Do not prescribe drug dose changes. Keep medication names in English.',
+    `Write summary, reasons, and timing tips in ${outputLanguage}.`,
+    'Return strict JSON only with this exact shape:',
+    '{"summary":"...","foodTypesToPrioritize":[{"type":"...","reason":"...","examples":["..."]}],"foodTypesToLimit":[{"type":"...","reason":"...","examples":["..."]}],"timingTips":["..."]}',
+    `Current medicines: ${input.medicines.join(', ')}`,
+    `Illness: ${illnesses.join(', ') || 'None specified'}`,
+    `Chronic diseases: ${chronicDiseases.join(', ') || 'None specified'}`,
+    `Infection history: ${infectionHistory.join(', ') || 'None specified'}`,
+    `Allergies: ${allergies.join(', ') || 'None specified'}`,
+  ].join('\n');
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.1,
+        max_tokens: 620,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'You are a conservative nutrition safety assistant. Return strict JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const rawText = extractGroqText(payload);
+    const parsed = parseGeminiJson(rawText);
+    if (!parsed) return null;
+
+    const mapFoodItem = (item: any) => ({
+      type: clean(item?.type) || 'General nutrition balance',
+      reason: clean(item?.reason) || 'Profile-based nutrition support may help treatment stability.',
+      examples: Array.isArray(item?.examples)
+        ? item.examples.map((example: string) => clean(example)).filter(Boolean).slice(0, 5)
+        : [],
+    });
+
+    const prioritize = Array.isArray(parsed.foodTypesToPrioritize)
+      ? parsed.foodTypesToPrioritize.map((item: any) => mapFoodItem(item)).slice(0, 5)
+      : [];
+
+    const limit = Array.isArray(parsed.foodTypesToLimit)
+      ? parsed.foodTypesToLimit.map((item: any) => mapFoodItem(item)).slice(0, 5)
+      : [];
+
+    const timingTips = Array.isArray(parsed.timingTips)
+      ? parsed.timingTips.map((item: string) => clean(item)).filter(Boolean).slice(0, 6)
+      : [];
+
+    return {
+      summary: clean(parsed.summary) || 'Medication and profile-based diet pattern can support safer long-term control.',
+      foodTypesToPrioritize: prioritize,
+      foodTypesToLimit: limit,
+      timingTips,
       source: 'Groq',
     };
   } catch {

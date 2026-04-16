@@ -139,11 +139,9 @@ const AddMedicine = () => {
   const [selectedSlots, setSelectedSlots] = useState<string[]>(['morning']);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [nameError, setNameError] = useState('');
-  const [genderError, setGenderError] = useState('');
   const [successState, setSuccessState] = useState<{ open: boolean; nextDose: string }>({ open: false, nextDose: '' });
 
   const drugInputRef = useRef<HTMLInputElement | null>(null);
-  const genderRef = useRef<HTMLDivElement | null>(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -153,9 +151,6 @@ const AddMedicine = () => {
     foodTiming: 'before-food' as 'before-food' | 'after-food',
     category: 'other' as 'blood-pressure' | 'diabetes' | 'thyroid' | 'antibiotic' | 'blood-thinner' | 'other',
     criticality: 'medium' as 'low' | 'medium' | 'high',
-    gender: '',
-    genderOther: '',
-    bloodGroup: '',
   });
 
   const categoryDescription = useMemo(
@@ -294,15 +289,6 @@ const AddMedicine = () => {
 
   const goToNextStep = () => {
     if (step === 1) {
-      if (!form.gender) {
-        setGenderError('Please select your gender');
-        if (genderRef.current) {
-          genderRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-        return;
-      }
-      setGenderError('');
-      
       if (!form.name.trim()) {
         setNameError('Please enter a drug name');
         shakeDrugNameField();
@@ -474,79 +460,6 @@ const AddMedicine = () => {
             {step === 1 && (
               <div className="space-y-5">
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-                    <span>Personal details</span>
-                    <hr className="flex-1 border-border" />
-                  </div>
-                  
-                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2" ref={genderRef}>
-                    <div>
-                      <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
-                        Gender <span className="text-red-500">*</span>
-                      </label>
-                      <div
-                        className={`grid grid-cols-3 gap-1 rounded-xl border bg-background p-1.5 ${
-                          genderError ? 'border-red-500 ring-1 ring-red-500/30' : 'border-input'
-                        }`}
-                      >
-                        {['Male', 'Female', 'Other'].map(option => (
-                          <button
-                            key={option}
-                            type="button"
-                            onClick={() => {
-                              setForm(prev => ({ ...prev, gender: option, genderOther: option !== 'Other' ? '' : prev.genderOther }));
-                              if (genderError) setGenderError('');
-                            }}
-                            className={`min-h-[48px] rounded-lg px-2 text-sm font-semibold transition-colors ${
-                              form.gender === option
-                                ? 'bg-primary text-primary-foreground shadow-card'
-                                : 'text-muted-foreground hover:bg-muted'
-                            }`}
-                          >
-                            {option}
-                          </button>
-                        ))}
-                      </div>
-                      {genderError && <p className="mt-1 text-xs font-semibold text-red-600">{genderError}</p>}
-                      {form.gender === 'Other' && (
-                        <div className="mt-3 animate-in slide-in-from-top-2 fade-in-50">
-                          <input
-                            value={form.genderOther}
-                            onChange={e => setForm(prev => ({ ...prev, genderOther: e.target.value }))}
-                            placeholder="Please specify (optional)"
-                            className="min-h-[48px] w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
-                          />
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
-                        Blood Group <span className="text-muted-foreground">(optional)</span>
-                      </label>
-                      <Select
-                        value={form.bloodGroup}
-                        onValueChange={val => setForm(prev => ({ ...prev, bloodGroup: val }))}
-                      >
-                        <SelectTrigger className="min-h-[48px] w-full rounded-xl text-sm font-medium">
-                          <SelectValue placeholder="Select blood group" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-60">
-                          {['A+', 'A−', 'B+', 'B−', 'AB+', 'AB−', 'O+', 'O−', "Don't know"].map(bg => (
-                            <SelectItem key={bg} value={bg}>
-                              {bg}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {form.bloodGroup === "Don't know" && (
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          You can update this later in your profile.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  
                   <div className="flex items-center gap-2 pt-2 text-sm font-semibold text-muted-foreground">
                     <span>Medicine details</span>
                     <hr className="flex-1 border-border" />

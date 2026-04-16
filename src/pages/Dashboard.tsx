@@ -128,9 +128,9 @@ const Dashboard = () => {
           .sort((a, b) => (a < b ? 1 : -1))[0] || todayKey;
 
         return {
-          drugName: medication.drugName,
-          category: medication.category,
-          criticality: medication.criticality,
+          drugName: medication.name || 'Medication',
+          category: 'other',
+          criticality: 'medium',
           missedCount: medMissedLogs.length,
           lastMissedDate,
         };
@@ -157,6 +157,19 @@ const Dashboard = () => {
     () => missedMedicationRows.map(item => item.drugName).filter(Boolean).join(', '),
     [missedMedicationRows],
   );
+
+  const missedDoseSummaryText = useMemo(() => {
+    if (missedMedicationRows.length === 0) return '';
+
+    if (missedMedicationRows.length === 1) {
+      const row = missedMedicationRows[0];
+      const doseLabel = row.missedCount > 1 ? 'doses' : 'dose';
+      return `You missed ${row.missedCount} ${doseLabel} of ${row.drugName}.`;
+    }
+
+    const totalMissed = missedMedicationRows.reduce((sum, item) => sum + item.missedCount, 0);
+    return `You missed ${totalMissed} doses across these medicines: ${missedDrugNames}.`;
+  }, [missedMedicationRows, missedDrugNames]);
 
   const playBeep = () => {
     if (settings.notificationSound === 'cherie') {
@@ -632,7 +645,7 @@ const Dashboard = () => {
             <p className="text-sm font-medium text-destructive/90">{t('dashboard.analyzingMissedDoseDanger')}</p>
           ) : missedDoseInsight ? (
             <>
-              <p className="mb-2 text-base font-semibold text-foreground">{missedDoseInsight.summary}</p>
+              <p className="mb-2 text-base font-semibold text-foreground">{missedDoseSummaryText}</p>
               <p className="mb-2 text-sm text-foreground/90">{missedDoseInsight.guidance}</p>
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-bold text-destructive">
                 {missedDoseInsight.riskProgression}

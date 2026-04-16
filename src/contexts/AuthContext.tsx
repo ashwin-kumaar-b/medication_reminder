@@ -265,6 +265,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Backward-compatible with current schema where password is required.
     password: passwordFallback ?? entry.password ?? '__supabase_auth__',
     role: entry.role,
+    gender: entry.gender ?? null,
+    gender_other: entry.genderOther ?? null,
+    blood_group: entry.bloodGroup ?? null,
     age: entry.age ?? null,
     illness: entry.illness ?? null,
     date_of_birth: entry.dateOfBirth ?? null,
