@@ -53,6 +53,27 @@ interface GeminiMedicalInput {
   evidence?: string[];
 }
 
+export interface MissedDoseSeverityInput {
+  patientAge?: number;
+  condition?: string;
+  missed: Array<{
+    drugName: string;
+    category: string;
+    criticality: string;
+    missedCount: number;
+    lastMissedDate: string;
+  }>;
+}
+
+export interface MissedDoseSeverityInsight {
+  severity: 'high' | 'moderate' | 'low';
+  summary: string;
+  guidance: string;
+  riskProgression: string;
+  missesUntilWorse: number | null;
+  source: 'Groq';
+}
+
 const clean = (value?: string) => (value || '').replace(/\s+/g, ' ').trim();
 
 const splitCsv = (value?: string) =>
@@ -98,6 +119,42 @@ const normalizeSeverity = (value?: string): 'high' | 'moderate' | 'low' => {
   if (normalized.includes('high') || normalized.includes('major') || normalized.includes('severe')) return 'high';
   if (normalized.includes('moderate') || normalized.includes('medium')) return 'moderate';
   return 'low';
+};
+
+const buildEvidenceTokenSet = (evidence: string[]) => {
+  const tokens = new Set<string>();
+  const joined = evidence.join(' ').toLowerCase();
+  const raw = joined.match(/[a-z][a-z0-9-]{3,}/g) || [];
+  raw.forEach(token => tokens.add(token));
+  return tokens;
+};
+
+const isGenericSafetyLine = (text: string) => {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes('consult') ||
+    lower.includes('healthcare provider') ||
+    lower.includes('pharmacist') ||
+    lower.includes('monitor') ||
+    lower.includes('seek medical')
+  );
+};
+
+const hasEvidenceOverlap = (text: string, evidenceTokens: Set<string>) => {
+  if (!text) return false;
+  if (isGenericSafetyLine(text)) return true;
+
+  const tokens = (text.toLowerCase().match(/[a-z][a-z0-9-]{3,}/g) || []).filter(token => !['risk', 'dose', 'drug', 'drugs', 'interaction'].includes(token));
+  if (tokens.length === 0) return false;
+
+  let matches = 0;
+  for (const token of tokens) {
+    if (evidenceTokens.has(token)) {
+      matches += 1;
+      if (matches >= 2) return true;
+    }
+  }
+  return false;
 };
 
 const buildDdinterUrl = (drugA: string, drugB: string) => {
@@ -360,11 +417,15 @@ export const inferFoodRiskFromOpenFda = (safety: OpenFdaSafety | null, foodQuery
 };
 
 export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise<GeminiMedicalAdvice | null> => {
+  const evidenceList = (input.evidence || []).map(item => clean(item)).filter(Boolean);
+  const evidenceTokens = buildEvidenceTokenSet(evidenceList);
+
   const prompt = [
     'You are a clinical safety assistant for a medication reminder app.',
-    'Use Evidence lines as high-confidence inputs for your risk assessment.',
-    'You may also use general pharmacology and clinical interaction knowledge when Evidence is sparse.',
-    'If your conclusion is inferred (not directly from Evidence), explicitly state that in explanation.',
+    'Use Evidence lines as the primary source for your risk assessment.',
+    'Do NOT invent specific side effects, contraindications, or cautions that are absent from Evidence.',
+    'If evidence is sparse, use conservative wording and explicitly say evidence is limited.',
+    'Do not output specific adverse effects unless grounded in the Evidence text.',
     'Use severity "none" only when there is genuinely no plausible interaction risk.',
     'Return only JSON with this exact shape:',
     '{"severity":"high|moderate|low|safe|none","summary":"...","explanation":"...","recommendations":["..."],"cautions":["..."]}',
@@ -375,7 +436,7 @@ export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise
     `Food: ${input.food || 'N/A'}`,
     `Supplements: ${(input.supplements || []).join(', ') || 'N/A'}`,
     `Symptoms: ${(input.symptoms || []).join(', ') || 'N/A'}`,
-    `Evidence: ${(input.evidence || []).join(' | ') || 'N/A'}`,
+    `Evidence: ${evidenceList.join(' | ') || 'N/A'}`,
     'Keep explanation concise and practical for patients.',
   ].join('\n');
 
@@ -404,12 +465,28 @@ export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise
         const rawText = extractGroqText(payload);
         const parsed = parseGeminiJson(rawText);
         if (parsed) {
+          const recommendations = Array.isArray(parsed.recommendations)
+            ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean)
+            : [];
+          const cautions = Array.isArray(parsed.cautions)
+            ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean)
+            : [];
+
+          const evidenceBoundRecommendations = recommendations.filter(item => hasEvidenceOverlap(item, evidenceTokens));
+          const evidenceBoundCautions = cautions.filter(item => hasEvidenceOverlap(item, evidenceTokens));
+
           return {
             severity: normalizeGeminiSeverity(parsed.severity),
             summary: clean(parsed.summary) || 'No summary was returned by Groq.',
             explanation: clean(parsed.explanation) || 'No additional explanation available.',
-            recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean) : [],
-            cautions: Array.isArray(parsed.cautions) ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean) : [],
+            recommendations:
+              evidenceBoundRecommendations.length > 0
+                ? evidenceBoundRecommendations
+                : ['Follow prescribed timing and confirm any concern with your healthcare provider.'],
+            cautions:
+              evidenceBoundCautions.length > 0
+                ? evidenceBoundCautions
+                : ['No evidence-confirmed specific side effect was retrieved from current sources.'],
             source: 'Groq',
           };
         }
@@ -443,13 +520,97 @@ export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise
     const parsed = parseGeminiJson(rawText);
     if (!parsed) return null;
 
+    const recommendations = Array.isArray(parsed.recommendations)
+      ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean)
+      : [];
+    const cautions = Array.isArray(parsed.cautions)
+      ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean)
+      : [];
+
+    const evidenceBoundRecommendations = recommendations.filter(item => hasEvidenceOverlap(item, evidenceTokens));
+    const evidenceBoundCautions = cautions.filter(item => hasEvidenceOverlap(item, evidenceTokens));
+
     return {
       severity: normalizeGeminiSeverity(parsed.severity),
       summary: clean(parsed.summary) || 'No summary was returned by Gemini.',
       explanation: clean(parsed.explanation) || 'No additional explanation available.',
-      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean) : [],
-      cautions: Array.isArray(parsed.cautions) ? parsed.cautions.map((item: string) => clean(item)).filter(Boolean) : [],
+      recommendations:
+        evidenceBoundRecommendations.length > 0
+          ? evidenceBoundRecommendations
+          : ['Follow prescribed timing and confirm any concern with your healthcare provider.'],
+      cautions:
+        evidenceBoundCautions.length > 0
+          ? evidenceBoundCautions
+          : ['No evidence-confirmed specific side effect was retrieved from current sources.'],
       source: 'Gemini',
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const getMissedDoseSeverityInsight = async (
+  input: MissedDoseSeverityInput,
+): Promise<MissedDoseSeverityInsight | null> => {
+  if (!GROQ_API_KEY || !input.missed.length) return null;
+
+  const prompt = [
+    'You are a medication adherence risk triage assistant.',
+    'Assess missed-dose severity for a patient using the provided missed medication list.',
+    'Provide practical and direct wording for a patient dashboard.',
+    'You MUST include a progression statement with an estimate of how many additional misses could worsen condition control.',
+    'If uncertain, give a conservative estimate and mention uncertainty in guidance.',
+    'Return strict JSON only with this exact shape:',
+    '{"severity":"high|moderate|low","summary":"...","guidance":"...","riskProgression":"...","missesUntilWorse":number|null}',
+    `Patient age: ${input.patientAge ?? 'unknown'}`,
+    `Primary condition: ${input.condition || 'not specified'}`,
+    `Missed meds: ${input.missed
+      .map(item => `${item.drugName} [category=${item.category}, criticality=${item.criticality}, missedCount=${item.missedCount}, lastMissed=${item.lastMissedDate}]`)
+      .join(' | ')}`,
+  ].join('\n');
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.2,
+        max_tokens: 320,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'You are a careful medication adherence risk assistant. Return strict JSON only.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const rawText = extractGroqText(payload);
+    const parsed = parseGeminiJson(rawText);
+    if (!parsed) return null;
+
+    const rawMissesUntilWorse =
+      typeof parsed.missesUntilWorse === 'number'
+        ? parsed.missesUntilWorse
+        : typeof parsed.missesUntilWorse === 'string'
+        ? Number(parsed.missesUntilWorse)
+        : null;
+
+    return {
+      severity: normalizeSeverity(parsed.severity),
+      summary: clean(parsed.summary) || 'Missed doses may increase your near-term health risk.',
+      guidance: clean(parsed.guidance) || 'Please follow your medication schedule and contact your clinician if misses continue.',
+      riskProgression: clean(parsed.riskProgression) || 'Further missed doses may worsen control of your condition.',
+      missesUntilWorse:
+        typeof rawMissesUntilWorse === 'number' && Number.isFinite(rawMissesUntilWorse) && rawMissesUntilWorse >= 0
+          ? Math.round(rawMissesUntilWorse)
+          : null,
+      source: 'Groq',
     };
   } catch {
     return null;
