@@ -59,7 +59,7 @@ const FoodCheck = () => {
           : mappedSeverity === 'moderate'
             ? 'Use caution and verify timing with your provider or pharmacist.'
             : 'No direct match found, but continue following prescribed guidance.'),
-      source: geminiAdvice ? `Gemini + USDA + OpenFDA${foodMatch ? '' : ' (food match unavailable)'}` : `USDA + OpenFDA${foodMatch ? '' : ' (food match unavailable)'}`,
+      source: geminiAdvice ? `${geminiAdvice.source} + USDA + OpenFDA${foodMatch ? '' : ' (food match unavailable)'}` : `USDA + OpenFDA${foodMatch ? '' : ' (food match unavailable)'}`,
     });
 
     setLoading(false);

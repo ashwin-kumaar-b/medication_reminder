@@ -71,7 +71,7 @@ const InteractionChecker = () => {
             severity: geminiFallback.severity === 'safe' || geminiFallback.severity === 'none' ? 'none' : geminiFallback.severity,
             description: `${geminiFallback.summary} ${geminiFallback.explanation}`.trim(),
             drugs: [leftDrug, rightDrug],
-            source: 'Gemini',
+            source: geminiFallback.source,
           },
         ];
       }
@@ -130,7 +130,7 @@ const InteractionChecker = () => {
         severity: geminiAdvice.severity === 'safe' || geminiAdvice.severity === 'none' ? 'none' : geminiAdvice.severity,
         description: `${geminiAdvice.summary} ${geminiAdvice.explanation}`.trim(),
         drugs: [leftDrug, rightDrug],
-        source: 'Gemini',
+        source: geminiAdvice.source,
       });
     }
 
