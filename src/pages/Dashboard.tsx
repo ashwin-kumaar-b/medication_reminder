@@ -5,15 +5,18 @@ import { useMedicines } from '@/contexts/MedicineContext';
 import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, HelpCircle, XCircle, BellRing } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAppSettings } from '@/features/settings/SettingsContext';
+import { getMissedDoseSeverityInsight, MissedDoseSeverityInsight } from '@/lib/medicationApis';
 
 const Dashboard = () => {
   const { user, createPatientForCaretaker, getLinkedPatients } = useAuth();
-  const { settings } = useAppSettings();
+  const { settings, t } = useAppSettings();
   const { medicines, logs, getCaretakerDashboardData, getPatientDashboardData, markDoseStatus } = useMedicines();
   const { toast } = useToast();
   const [selectedPatientId, setSelectedPatientId] = useState('');
   const [savingPatient, setSavingPatient] = useState(false);
   const [statsRange, setStatsRange] = useState<'daily' | 'weekly'>('daily');
+  const [missedDoseInsight, setMissedDoseInsight] = useState<MissedDoseSeverityInsight | null>(null);
+  const [loadingMissedDoseInsight, setLoadingMissedDoseInsight] = useState(false);
   const [alarmVisible, setAlarmVisible] = useState(false);
   const [alarmItemIds, setAlarmItemIds] = useState<string[]>([]);
   const [manualAlarmMode, setManualAlarmMode] = useState(false);
@@ -92,20 +95,63 @@ const Dashboard = () => {
 
   const takenCount = statsRange === 'daily' ? takenToday : takenThisWeek;
   const missedCount = statsRange === 'daily' ? missedToday : missedThisWeek;
-  const rangeLabel = statsRange === 'daily' ? 'Today' : 'This Week';
+  const rangeLabel = statsRange === 'daily' ? t('common.today') : t('common.thisWeek');
 
   const cards = [
-    { label: 'Active Medicines', value: activeMeds.length, icon: Pill, color: 'text-primary bg-accent' },
-    { label: `Taken ${rangeLabel}`, value: takenCount, icon: Clock, color: 'text-success bg-success/10' },
-    { label: `Missed ${rangeLabel}`, value: missedCount, icon: XCircle, color: 'text-destructive bg-destructive/10' },
-    { label: 'Total Medicines', value: medicines.length, icon: AlertTriangle, color: 'text-warning bg-warning/10' },
+    { label: t('dashboard.activeMedicines'), value: activeMeds.length, icon: Pill, color: 'text-primary bg-accent' },
+    { label: `${t('dashboard.taken')} ${rangeLabel}`, value: takenCount, icon: Clock, color: 'text-success bg-success/10' },
+    { label: `${t('dashboard.missed')} ${rangeLabel}`, value: missedCount, icon: XCircle, color: 'text-destructive bg-destructive/10' },
+    { label: t('dashboard.totalMedicines'), value: medicines.length, icon: AlertTriangle, color: 'text-warning bg-warning/10' },
   ];
 
   const actions = [
-    { to: '/add-medicine', label: 'Add Medicine', icon: Plus, desc: 'Add a new medication to your list' },
-    { to: '/interaction-checker', label: 'Check Interactions', icon: GitCompareArrows, desc: 'Verify drug safety' },
-    { to: '/can-i-take', label: 'Can I Take Now?', icon: HelpCircle, desc: 'Real-time dose safety check' },
+    { to: '/add-medicine', label: t('actions.addMedicine'), icon: Plus, desc: t('actions.addMedicineDesc') },
+    { to: '/interaction-checker', label: t('actions.checkInteractions'), icon: GitCompareArrows, desc: t('actions.checkInteractionsDesc') },
+    { to: '/can-i-take', label: t('actions.canITakeNow'), icon: HelpCircle, desc: t('actions.canITakeNowDesc') },
   ];
+
+  const missedMedicationRows = useMemo(() => {
+    const relevantMissedLogs = logs.filter(log => {
+      if (log.status !== 'missed') return false;
+      return statsRange === 'daily' ? log.date === todayKey : log.date >= weekStartKey && log.date <= todayKey;
+    });
+    const uniqueMedicationIds = Array.from(new Set(relevantMissedLogs.map(log => log.medicationId)));
+
+    return uniqueMedicationIds
+      .map(medicationId => {
+        const medication = medicines.find(med => med.id === medicationId);
+        if (!medication) return null;
+
+        const medMissedLogs = relevantMissedLogs.filter(log => log.medicationId === medicationId);
+        const lastMissedDate = medMissedLogs
+          .map(entry => entry.date)
+          .sort((a, b) => (a < b ? 1 : -1))[0] || todayKey;
+
+        return {
+          drugName: medication.drugName,
+          category: medication.category,
+          criticality: medication.criticality,
+          missedCount: medMissedLogs.length,
+          lastMissedDate,
+        };
+      })
+      .filter(Boolean) as Array<{
+      drugName: string;
+      category: string;
+      criticality: string;
+      missedCount: number;
+      lastMissedDate: string;
+    }>;
+  }, [logs, medicines, statsRange, todayKey, weekStartKey]);
+
+  const missedMedicationFingerprint = useMemo(
+    () =>
+      missedMedicationRows
+        .map(item => `${item.drugName}|${item.category}|${item.criticality}|${item.missedCount}|${item.lastMissedDate}`)
+        .sort()
+        .join('::'),
+    [missedMedicationRows],
+  );
 
   const playBeep = () => {
     if (settings.notificationSound === 'cherie') {
@@ -192,7 +238,7 @@ const Dashboard = () => {
 
   const handleTestReminder = () => {
     if (!nextDoseGroup || nextDoseGroup.items.length === 0) {
-      toast({ title: 'No medicine to test', description: 'Add at least one pending medicine to preview reminder overlay.' });
+      toast({ title: t('dashboard.noMedicineToTest'), description: t('dashboard.addPendingForPreview') });
       return;
     }
 
@@ -212,13 +258,13 @@ const Dashboard = () => {
       }
       return next;
     });
-    toast({ title: 'Dose marked as taken', description: 'Great job staying on schedule.' });
+    toast({ title: t('dashboard.doseMarkedTaken'), description: t('dashboard.greatJob') });
   };
 
   const handleTakeFromCard = async (medicationId: string) => {
     await markDoseStatus(medicationId, 'taken');
     clearSnoozeForMedication(medicationId);
-    toast({ title: 'Dose marked as taken', description: 'Medicine status updated.' });
+    toast({ title: t('dashboard.doseMarkedTaken'), description: t('dashboard.medicineStatusUpdated') });
   };
 
   const handleSnoozeFiveMinutes = () => {
@@ -248,7 +294,7 @@ const Dashboard = () => {
     });
 
     closeAlarm();
-    toast({ title: 'Snoozed', description: 'We will remind you again in 5 minutes.' });
+    toast({ title: t('dashboard.snoozed'), description: t('dashboard.remindAgainFive') });
   };
 
   const handleAddPatient = async (event: React.FormEvent) => {
@@ -320,6 +366,35 @@ const Dashboard = () => {
       stopAlarm();
     };
   }, [settings.notificationSound]);
+
+  useEffect(() => {
+    if (user?.role !== 'patient') return;
+
+    if (missedMedicationRows.length === 0) {
+      setMissedDoseInsight(null);
+      setLoadingMissedDoseInsight(false);
+      return;
+    }
+
+    let cancelled = false;
+    const run = async () => {
+      setLoadingMissedDoseInsight(true);
+      const insight = await getMissedDoseSeverityInsight({
+        patientAge: user?.age,
+        condition: user?.illness,
+        missed: missedMedicationRows,
+      });
+      if (cancelled) return;
+      setMissedDoseInsight(insight);
+      setLoadingMissedDoseInsight(false);
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.role, user?.age, user?.illness, missedMedicationFingerprint]);
 
   if (user?.role === 'caretaker') {
     return (
@@ -464,10 +539,10 @@ const Dashboard = () => {
     <div className="container mx-auto px-4 py-8">
       {/* Welcome */}
       <div className="mb-8 animate-fade-in">
-        <h1 className="text-2xl font-bold text-foreground">Welcome back, {user?.name || 'User'} 👋</h1>
-        <p className="text-muted-foreground">Here's your medication overview for today.</p>
+        <h1 className="text-2xl font-bold text-foreground">{t('dashboard.welcomeBack')}, {user?.name || 'User'} 👋</h1>
+        <p className="text-muted-foreground">{t('dashboard.overviewToday')}</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Age: {user?.age ?? 'N/A'} • Condition: {user?.illness || 'Not specified'} • Interface: {user?.uiMode || 'younger'}
+          {t('dashboard.age')}: {user?.age ?? 'N/A'} • {t('dashboard.condition')}: {user?.illness || t('dashboard.notSpecified')} • {t('dashboard.interface')}: {user?.uiMode || 'younger'}
         </p>
       </div>
 
@@ -481,7 +556,7 @@ const Dashboard = () => {
               statsRange === 'daily' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
             }`}
           >
-            Daily
+            {t('common.daily')}
           </button>
           <button
             type="button"
@@ -490,7 +565,7 @@ const Dashboard = () => {
               statsRange === 'weekly' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
             }`}
           >
-            Weekly
+            {t('common.weekly')}
           </button>
         </div>
       </div>
@@ -510,10 +585,55 @@ const Dashboard = () => {
         ))}
       </div>
 
+      {missedMedicationRows.length > 0 && (
+        <section className="mb-8 rounded-xl border-2 border-destructive/50 bg-gradient-to-br from-destructive/10 via-card to-destructive/5 p-5 shadow-elevated">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-destructive/15 text-destructive animate-pulse">
+                <AlertTriangle className="h-4 w-4" />
+              </span>
+              <h2 className="text-lg font-extrabold tracking-wide text-destructive">Missed Dose Severity</h2>
+            </div>
+            {missedDoseInsight?.severity && (
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-extrabold tracking-wider uppercase ${
+                  missedDoseInsight.severity === 'high'
+                    ? 'border-destructive/40 bg-destructive/20 text-destructive'
+                    : missedDoseInsight.severity === 'moderate'
+                    ? 'border-warning/40 bg-warning/20 text-warning'
+                    : 'border-success/40 bg-success/15 text-success'
+                }`}
+              >
+                {missedDoseInsight.severity}
+              </span>
+            )}
+          </div>
+
+          <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-bold uppercase tracking-wide text-destructive">
+            Immediate adherence warning: missed doses can rapidly increase health risk.
+          </p>
+
+          {loadingMissedDoseInsight ? (
+            <p className="text-sm font-medium text-destructive/90">Analyzing missed-dose danger level with Groq...</p>
+          ) : missedDoseInsight ? (
+            <>
+              <p className="mb-2 text-base font-semibold text-foreground">{missedDoseInsight.summary}</p>
+              <p className="mb-2 text-sm text-foreground/90">{missedDoseInsight.guidance}</p>
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-bold text-destructive">
+                {missedDoseInsight.riskProgression}
+              </p>
+              <p className="mt-2 text-xs font-medium text-muted-foreground">Source: {missedDoseInsight.source}</p>
+            </>
+          ) : (
+            <p className="text-sm text-destructive/90">Groq danger insight is currently unavailable. Please try again shortly.</p>
+          )}
+        </section>
+      )}
+
       <section className="mb-8 rounded-xl border border-border bg-card p-5 shadow-card">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">
-            {nextDoseGroup?.items.length && nextDoseGroup.items.length > 1 ? 'Next Medicines to Take' : 'Next Medicine to Take'}
+            {nextDoseGroup?.items.length && nextDoseGroup.items.length > 1 ? t('dashboard.nextMedicinePlural') : t('dashboard.nextMedicineSingle')}
           </h2>
           <div className="flex items-center gap-2">
             {nextDoseGroup && (
@@ -523,7 +643,7 @@ const Dashboard = () => {
                   onClick={handleTestReminder}
                   className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-foreground hover:bg-muted"
                 >
-                  Test Reminder
+                  {t('dashboard.testReminder')}
                 </button>
                 <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground">
                   {nextDoseGroup.time}
@@ -534,13 +654,13 @@ const Dashboard = () => {
         </div>
 
         {!nextDoseGroup ? (
-          <p className="text-sm text-muted-foreground">You are all caught up. No pending medicines for the rest of today.</p>
+          <p className="text-sm text-muted-foreground">{t('dashboard.noPending')}</p>
         ) : (
           <>
             <p className="mb-4 text-sm text-muted-foreground">
               {nextDoseGroup.isOverdue
-                ? 'These medicines are due now. Please take them as soon as possible.'
-                : `Upcoming dose window in ${nextDoseGroup.minutesUntil} minute(s).`}
+                ? t('dashboard.dueNow')
+                : `${t('dashboard.upcomingWindow')} ${nextDoseGroup.minutesUntil} minute(s).`}
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               {nextDoseGroup.items.map(item => (
@@ -563,15 +683,15 @@ const Dashboard = () => {
                     <span className="text-xs font-medium uppercase text-muted-foreground">{item.medication.criticality}</span>
                   </div>
                   <p className="text-sm text-muted-foreground">{item.medication.dosage}</p>
-                  <p className="text-xs text-muted-foreground">Category: {item.medication.category}</p>
-                  <p className="text-xs text-muted-foreground">Scheduled at: {item.medication.scheduleTime}</p>
+                  <p className="text-xs text-muted-foreground">{t('dashboard.category')}: {item.medication.category}</p>
+                  <p className="text-xs text-muted-foreground">{t('dashboard.scheduledAt')}: {item.medication.scheduleTime}</p>
                   {nextDoseGroup.isOverdue && (
                     <button
                       type="button"
                       onClick={() => void handleTakeFromCard(item.medication.id)}
                       className="mt-3 rounded-md bg-success px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
                     >
-                      Took medicine
+                      {t('dashboard.tookMedicine')}
                     </button>
                   )}
                 </div>
@@ -586,9 +706,9 @@ const Dashboard = () => {
           <div className="w-full max-w-xl rounded-xl border border-warning/40 bg-card p-5 shadow-elevated">
             <div className="mb-3 flex items-center gap-2 text-warning">
               <BellRing className="h-5 w-5" />
-              <h3 className="text-lg font-semibold text-foreground">Medicine Reminder</h3>
+              <h3 className="text-lg font-semibold text-foreground">{t('dashboard.medicineReminder')}</h3>
             </div>
-            <p className="mb-4 text-sm text-muted-foreground">Your scheduled medicine is due now. Take it, snooze for 5 minutes, or stop the alarm.</p>
+            <p className="mb-4 text-sm text-muted-foreground">{t('dashboard.overlayDueNowHelp')}</p>
             <div className="space-y-3">
               {alarmItemIds.map(id => {
                 const item = nextDoseGroup?.items.find(entry => entry.medication.id === id);
@@ -596,13 +716,13 @@ const Dashboard = () => {
                 return (
                   <div key={id} className="rounded-lg border border-border bg-muted/30 p-3">
                     <p className="font-semibold text-foreground">{item.medication.drugName}</p>
-                    <p className="text-xs text-muted-foreground">Scheduled at: {item.medication.scheduleTime}</p>
+                    <p className="text-xs text-muted-foreground">{t('dashboard.scheduledAt')}: {item.medication.scheduleTime}</p>
                     <button
                       type="button"
                       onClick={() => void handleTakeFromAlarm(id)}
                       className="mt-2 rounded-md bg-success px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
                     >
-                      Took medicine
+                      {t('dashboard.tookMedicine')}
                     </button>
                   </div>
                 );
@@ -614,14 +734,14 @@ const Dashboard = () => {
                 onClick={handleSnoozeFiveMinutes}
                 className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground"
               >
-                Snooze 5 min
+                {t('dashboard.snoozeFiveMin')}
               </button>
               <button
                 type="button"
                 onClick={closeAlarm}
                 className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground"
               >
-                Stop
+                {t('dashboard.stop')}
               </button>
             </div>
           </div>
@@ -629,7 +749,7 @@ const Dashboard = () => {
       )}
 
       {/* Quick Actions */}
-      <h2 className="mb-4 text-lg font-semibold text-foreground">Quick Actions</h2>
+      <h2 className="mb-4 text-lg font-semibold text-foreground">{t('dashboard.quickActions')}</h2>
       <div className="grid gap-4 sm:grid-cols-3">
         {actions.map(({ to, label, icon: Icon, desc }) => (
           <Link key={to} to={to} className="group flex items-start gap-4 rounded-xl border border-border bg-card p-5 shadow-card transition-all hover:shadow-elevated">
