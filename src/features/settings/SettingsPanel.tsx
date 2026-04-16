@@ -5,8 +5,19 @@ import { NotificationSound, useAppSettings } from '@/features/settings/SettingsC
 const SettingsPanel = () => {
   const { settings, setLanguage, setNotificationSound, setNotificationVolume, t } = useAppSettings();
   const audioContextRef = useRef<AudioContext | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const playPreview = () => {
+    if (settings.notificationSound === 'cherie') {
+      if (!previewAudioRef.current) {
+        previewAudioRef.current = new Audio('/sounds/cherie-reminder.mp3');
+      }
+      previewAudioRef.current.volume = settings.notificationVolume;
+      previewAudioRef.current.currentTime = 0;
+      void previewAudioRef.current.play();
+      return;
+    }
+
     try {
       if (!audioContextRef.current) {
         audioContextRef.current = new window.AudioContext();
@@ -60,6 +71,9 @@ const SettingsPanel = () => {
             <option value="en">{t('settings.english')}</option>
             <option value="es">{t('settings.spanish')}</option>
             <option value="fr">{t('settings.french')}</option>
+            <option value="ta">{t('settings.tamil')}</option>
+            <option value="te">{t('settings.telugu')}</option>
+            <option value="hi">{t('settings.hindi')}</option>
           </select>
         </div>
 
@@ -73,6 +87,7 @@ const SettingsPanel = () => {
             <option value="classic">{t('settings.soundClassic')}</option>
             <option value="soft">{t('settings.soundSoft')}</option>
             <option value="urgent">{t('settings.soundUrgent')}</option>
+            <option value="cherie">{t('settings.soundCherie')}</option>
           </select>
         </div>
 
