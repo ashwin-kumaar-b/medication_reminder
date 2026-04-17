@@ -296,38 +296,61 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Backward-compatible with current schema where password is required.
     password: passwordFallback ?? entry.password ?? '__supabase_auth__',
     role: entry.role,
-    gender: entry.gender ?? null,
-    gender_other: entry.genderOther ?? null,
-    blood_group: entry.bloodGroup ?? null,
-    age: entry.age ?? null,
-    illness: entry.illness ?? null,
-    date_of_birth: entry.dateOfBirth ?? null,
-    height_cm: entry.heightCm ?? null,
-    weight_kg: entry.weightKg ?? null,
-    chronic_diseases: entry.chronicDiseases ?? null,
-    infection_history: entry.infectionHistory ?? null,
-    allergies: entry.allergies ?? null,
-    emergency_contact_email: entry.emergencyContactEmail ?? null,
+    phone: entry.phoneNumber ?? null,
     ui_mode: entry.uiMode,
     linked_patient_id: entry.linkedPatientId ?? null,
-    profile_json: {
-      patientId: entry.patientId ?? null,
-      caretakerId: entry.caretakerId ?? null,
-      relation: entry.relation ?? null,
-      relationOther: entry.relationOther ?? null,
-      phoneNumber: entry.phoneNumber ?? null,
-      gender: entry.gender ?? null,
-      genderOther: entry.genderOther ?? null,
-      bloodGroup: entry.bloodGroup ?? null,
-      dateOfBirth: entry.dateOfBirth ?? null,
-      heightCm: entry.heightCm ?? null,
-      weightKg: entry.weightKg ?? null,
-      chronicDiseases: entry.chronicDiseases ?? [],
-      infectionHistory: entry.infectionHistory ?? [],
-      allergies: entry.allergies ?? [],
-      emergencyContactEmail: entry.emergencyContactEmail ?? null,
-    },
   });
+
+  const buildHealthProfilePayload = (entry: User) => {
+    if (entry.role !== 'patient') return null;
+
+    if (
+      !entry.gender ||
+      !entry.bloodGroup ||
+      !entry.dateOfBirth ||
+      typeof entry.heightCm !== 'number' ||
+      typeof entry.weightKg !== 'number' ||
+      !entry.chronicDiseases?.length ||
+      !entry.infectionHistory?.length ||
+      !entry.emergencyContactEmail
+    ) {
+      return null;
+    }
+
+    return {
+      user_id: entry.id,
+      gender: entry.gender,
+      gender_other: entry.genderOther ?? null,
+      blood_group: entry.bloodGroup,
+      date_of_birth: entry.dateOfBirth,
+      height_cm: entry.heightCm,
+      weight_kg: entry.weightKg,
+      chronic_diseases: entry.chronicDiseases,
+      infection_history: entry.infectionHistory,
+      allergies: entry.allergies ?? [],
+      emergency_contact_email: entry.emergencyContactEmail,
+      profile_json: {
+        patientId: entry.patientId ?? null,
+      },
+      updated_at: new Date().toISOString(),
+    };
+  };
+
+  const buildCaretakerProfilePayload = (entry: User) => {
+    if (entry.role !== 'caretaker' || !entry.relation) return null;
+
+    return {
+      user_id: entry.id,
+      relation: entry.relation,
+      relation_other: entry.relationOther ?? null,
+      linked_patient_id: entry.linkedPatientId ?? null,
+      profile_json: {
+        caretakerId: entry.caretakerId ?? null,
+        linkedPatientId: entry.linkedPatientId ?? null,
+      },
+      updated_at: new Date().toISOString(),
+    };
+  };
 
   const upsertUserRow = async (entry: User, passwordFallback?: string) => {
     if (!isSupabaseConfigured || !supabase) return undefined;
@@ -336,7 +359,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .from('users')
       .upsert(buildUserRowPayload(entry, passwordFallback), { onConflict: 'id' });
 
-    return error?.message;
+    if (error) return error.message;
+
+    const healthPayload = buildHealthProfilePayload(entry);
+    if (healthPayload) {
+      const { error: healthError } = await supabase
+        .from('user_health_profiles')
+        .upsert(healthPayload, { onConflict: 'user_id' });
+
+      if (healthError) return healthError.message;
+    }
+
+    const caretakerPayload = buildCaretakerProfilePayload(entry);
+    if (caretakerPayload) {
+      const { error: caretakerError } = await supabase
+        .from('caretakers')
+        .upsert(caretakerPayload, { onConflict: 'user_id' });
+
+      if (caretakerError) return caretakerError.message;
+    }
+
+    return undefined;
   };
 
   const loadUsersFromSupabase = async () => {
@@ -437,7 +480,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const normalizedGenderOther = input.genderOther?.trim();
     const normalizedBloodGroup = input.bloodGroup?.trim();
 
-    if (!normalizedGender) {
+    if (input.role === 'patient' && !normalizedGender) {
       return { ok: false, error: 'Please select your gender.' };
     }
 
@@ -463,9 +506,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         role: input.role,
         relation: input.role === 'caretaker' ? input.relation : undefined,
         relationOther: input.role === 'caretaker' && input.relation === 'Other' ? input.relationOther : undefined,
-        gender: normalizedGender,
-        genderOther: normalizedGender === 'Other' ? normalizedGenderOther : undefined,
-        bloodGroup: normalizedBloodGroup || undefined,
+        gender: input.role === 'patient' ? normalizedGender : undefined,
+        genderOther: input.role === 'patient' && normalizedGender === 'Other' ? normalizedGenderOther : undefined,
+        bloodGroup: input.role === 'patient' ? normalizedBloodGroup || undefined : undefined,
         age: resolvedAge,
         illness: resolvedIllness,
         dateOfBirth: input.dateOfBirth,
@@ -520,9 +563,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       role: input.role,
       relation: input.role === 'caretaker' ? input.relation : undefined,
       relationOther: input.role === 'caretaker' && input.relation === 'Other' ? input.relationOther : undefined,
-      gender: normalizedGender,
-      genderOther: normalizedGender === 'Other' ? normalizedGenderOther : undefined,
-      bloodGroup: normalizedBloodGroup || undefined,
+      gender: input.role === 'patient' ? normalizedGender : undefined,
+      genderOther: input.role === 'patient' && normalizedGender === 'Other' ? normalizedGenderOther : undefined,
+      bloodGroup: input.role === 'patient' ? normalizedBloodGroup || undefined : undefined,
       age: resolvedAge,
       illness: resolvedIllness,
       dateOfBirth: input.dateOfBirth,
