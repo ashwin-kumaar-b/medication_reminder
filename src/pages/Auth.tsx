@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Loader2, Eye, EyeOff, CheckCircle, Copy } from 'lucide-react';
 import { useAuth, UiMode, UserRole } from '@/contexts/AuthContext';
@@ -26,8 +26,36 @@ const chronicDiseaseOptions = [
 ];
 
 const infectionHistoryOptions = ['Hepatitis', 'TB', 'Recurring UTIs', 'None'];
-const allergyCategories = ['Drug', 'Food', 'Environmental'] as const;
+const allergyCategories = ['Drug', 'Food', 'Environmental', 'None'] as const;
 type AllergyCategory = (typeof allergyCategories)[number];
+
+type StepTwoErrors = {
+  gender: string;
+  genderOther: string;
+  bloodGroup: string;
+  heightCm: string;
+  weightKg: string;
+  chronicDisease: string;
+  infectionHistory: string;
+  allergies: string;
+  allergyDetails: string;
+  emergencyContactEmail: string;
+};
+
+type StepTwoField = keyof StepTwoErrors;
+
+const emptyStepTwoErrors: StepTwoErrors = {
+  gender: '',
+  genderOther: '',
+  bloodGroup: '',
+  heightCm: '',
+  weightKg: '',
+  chronicDisease: '',
+  infectionHistory: '',
+  allergies: '',
+  allergyDetails: '',
+  emergencyContactEmail: '',
+};
 
 const toAgeFromDob = (dob: string): number | undefined => {
   if (!dob) return undefined;
@@ -58,6 +86,12 @@ const normalizePhoneNumber = (value: string) => {
   return `+${trimmed.replace(/\D/g, '')}`;
 };
 
+const isValidEmailAddress = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+const isValidPhoneNumber = (value: string) => /^\+?\d{10,15}$/.test(value.trim().replace(/[\s()-]/g, ''));
+
+const isValidContactValue = (value: string) => isValidEmailAddress(value) || isValidPhoneNumber(value);
+
 const Auth = () => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [registerStep, setRegisterStep] = useState<1 | 2>(1);
@@ -77,7 +111,8 @@ const Auth = () => {
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState('');
   const [genderOther, setGenderOther] = useState('');
-  const [genderError, setGenderError] = useState('');
+  const [stepTwoErrors, setStepTwoErrors] = useState<StepTwoErrors>(emptyStepTwoErrors);
+  const [activeStepTwoField, setActiveStepTwoField] = useState<StepTwoField | null>(null);
   const [bloodGroup, setBloodGroup] = useState('');
   const [heightCm, setHeightCm] = useState<string>('');
   const [weightKg, setWeightKg] = useState<string>('');
@@ -90,11 +125,17 @@ const Auth = () => {
     Drug: '',
     Food: '',
     Environmental: '',
+    None: '',
   });
   const [emergencyContactEmail, setEmergencyContactEmail] = useState('');
   const [uiMode, setUiMode] = useState<UiMode>('younger');
   const [linkedPatientId, setLinkedPatientId] = useState('');
   const [successScreen, setSuccessScreen] = useState<{ open: boolean; name: string; patientId: string; role: 'patient' | 'caretaker' } | null>(null);
+  const weightInputRef = useRef<HTMLInputElement>(null);
+  const chronicDiseaseInputRef = useRef<HTMLInputElement>(null);
+  const infectionHistoryInputRef = useRef<HTMLInputElement>(null);
+  const emergencyContactInputRef = useRef<HTMLInputElement>(null);
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
   const { register, login } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -114,7 +155,8 @@ const Auth = () => {
     setDateOfBirth('');
     setGender('');
     setGenderOther('');
-    setGenderError('');
+    setStepTwoErrors(emptyStepTwoErrors);
+    setActiveStepTwoField(null);
     setBloodGroup('');
     setHeightCm('');
     setWeightKg('');
@@ -127,6 +169,7 @@ const Auth = () => {
       Drug: '',
       Food: '',
       Environmental: '',
+      None: '',
     });
     setEmergencyContactEmail('');
     setUiMode('younger');
@@ -135,13 +178,25 @@ const Auth = () => {
   };
 
   const toggleAllergyCategory = (category: AllergyCategory) => {
+    setStepTwoErrors(prev => ({ ...prev, allergies: '', allergyDetails: '' }));
+
+    if (category === 'None') {
+      if (selectedAllergyCategories.includes('None')) {
+        setSelectedAllergyCategories([]);
+      } else {
+        setSelectedAllergyCategories(['None']);
+        setAllergyInputs({ Drug: '', Food: '', Environmental: '', None: '' });
+      }
+      return;
+    }
+
     if (selectedAllergyCategories.includes(category)) {
       setSelectedAllergyCategories(selectedAllergyCategories.filter(item => item !== category));
       setAllergyInputs(prev => ({ ...prev, [category]: '' }));
       return;
     }
 
-    setSelectedAllergyCategories([...selectedAllergyCategories, category]);
+    setSelectedAllergyCategories([...selectedAllergyCategories.filter(c => c !== 'None'), category]);
   };
 
   const filteredChronicDiseases = chronicDiseaseOptions.filter(option =>
@@ -207,7 +262,18 @@ const Auth = () => {
   const isOlderLayout = mode === 'register' && effectiveUiMode === 'older';
   const registerFieldClass =
     'w-full rounded-lg border border-input bg-background px-3 py-2.5 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20';
-  const registerFieldSizeClass = isOlderLayout ? 'text-[18px] leading-7' : 'text-base';
+  const registerFieldSizeClass = 'text-base';
+  const shouldShowStepTwoError = (field: StepTwoField) => activeStepTwoField === field && Boolean(stepTwoErrors[field]);
+  const handleEnterFocusNext = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    nextRef: React.RefObject<HTMLElement>,
+    field: StepTwoField,
+  ) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    setActiveStepTwoField(field);
+    nextRef.current?.focus();
+  };
 
   const canGoToStepTwo =
     name.trim().length > 1 &&
@@ -274,22 +340,54 @@ const Auth = () => {
       if (role === 'caretaker') {
         // Skip step 2 for caretakers
       } else {
+        setStepTwoErrors(emptyStepTwoErrors);
+        setActiveStepTwoField(null);
         setRegisterStep(2);
         return;
       }
     }
 
     if (mode === 'register' && registerStep === 2) {
-      if (role === 'patient' && !gender) {
-        setGenderError('Please select your gender');
-        toast({
-          title: 'Gender is required',
-          description: 'Please select your gender to continue.',
-          variant: 'destructive',
-        });
-        return;
+      if (role === 'patient') {
+        const nextErrors: StepTwoErrors = { ...emptyStepTwoErrors };
+
+        if (!gender) nextErrors.gender = 'Please select your gender to continue.';
+        if (gender === 'Other' && !genderOther.trim()) nextErrors.genderOther = 'Please specify your gender to continue.';
+        if (!bloodGroup) nextErrors.bloodGroup = 'Please select your blood group to continue.';
+        if (!heightCm) nextErrors.heightCm = 'Please enter your height to continue.';
+        if (!weightKg) nextErrors.weightKg = 'Please enter your weight to continue.';
+        if (!chronicDiseaseInput.trim()) nextErrors.chronicDisease = 'Please provide chronic disease details to continue.';
+        if (!infectionHistoryInput.trim()) nextErrors.infectionHistory = 'Please provide infection history to continue.';
+        if (selectedAllergyCategories.length === 0) nextErrors.allergies = 'Please select at least one allergy option to continue.';
+        if (selectedAllergyCategories.some(c => c !== 'None' && !allergyInputs[c].trim())) {
+          nextErrors.allergyDetails = 'Please add details for the selected allergy type(s) to continue.';
+        }
+        if (!emergencyContactEmail.trim()) {
+          nextErrors.emergencyContactEmail = 'Please enter an emergency contact phone number or email to continue.';
+        } else if (!isValidContactValue(emergencyContactEmail)) {
+          nextErrors.emergencyContactEmail = 'Please enter a valid phone number or email address.';
+        }
+
+        setStepTwoErrors(nextErrors);
+
+        if (Object.values(nextErrors).some(Boolean)) {
+          const firstInvalidFieldOrder: StepTwoField[] = [
+            'gender',
+            'genderOther',
+            'bloodGroup',
+            'heightCm',
+            'weightKg',
+            'chronicDisease',
+            'infectionHistory',
+            'allergies',
+            'allergyDetails',
+            'emergencyContactEmail',
+          ];
+          const firstInvalidField = firstInvalidFieldOrder.find(field => Boolean(nextErrors[field]));
+          setActiveStepTwoField(firstInvalidField ?? null);
+          return;
+        }
       }
-      if (role === 'patient') setGenderError('');
     }
 
     setLoading(true);
@@ -299,9 +397,9 @@ const Auth = () => {
     const normalizedAllergies = selectedAllergyCategories
       .map(category => ({
         category,
-        trigger: allergyInputs[category].trim(),
+        trigger: category === 'None' ? 'None' : allergyInputs[category].trim(),
       }))
-      .filter(item => item.trigger.length > 0);
+      .filter(item => item.category === 'None' || item.trigger.length > 0);
 
     const response =
       mode === 'register'
@@ -456,7 +554,12 @@ const Auth = () => {
           
           <button
             type="button"
-            onClick={() => setRole('caretaker')}
+            onClick={() => {
+              setRole('caretaker');
+              setRegisterStep(1);
+              setStepTwoErrors(emptyStepTwoErrors);
+              setActiveStepTwoField(null);
+            }}
             className={`flex flex-col items-center justify-center rounded-xl border-2 p-4 transition-all ${
               role === 'caretaker'
                 ? 'border-primary bg-primary/10 shadow-md'
@@ -650,7 +753,7 @@ const Auth = () => {
             </>
           )}
 
-          {mode === 'register' && registerStep === 2 && (
+          {mode === 'register' && registerStep === 2 && role === 'patient' && (
             <div className={`grid gap-4 ${isOlderLayout ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
               {role === 'patient' && (
                 <div className={isOlderLayout ? '' : 'sm:col-span-2'}>
@@ -661,7 +764,7 @@ const Auth = () => {
                       </label>
                       <div
                         className={`grid grid-cols-3 gap-1 rounded-xl border bg-background p-1.5 ${
-                          genderError ? 'border-red-500 ring-1 ring-red-500/30' : 'border-input'
+                          shouldShowStepTwoError('gender') ? 'border-red-500 ring-1 ring-red-500/30' : 'border-input'
                         }`}
                       >
                         {['Male', 'Female', 'Other'].map(option => (
@@ -669,9 +772,10 @@ const Auth = () => {
                             key={option}
                             type="button"
                             onClick={() => {
+                              setActiveStepTwoField('gender');
                               setGender(option);
                               if (option !== 'Other') setGenderOther('');
-                              if (genderError) setGenderError('');
+                              setStepTwoErrors(prev => ({ ...prev, gender: '', genderOther: '' }));
                             }}
                             className={`min-h-[48px] rounded-lg px-2 text-sm font-semibold transition-colors ${
                               gender === option
@@ -683,28 +787,39 @@ const Auth = () => {
                           </button>
                         ))}
                       </div>
-                      {genderError && <p className="mt-1 text-xs font-semibold text-red-600">{genderError}</p>}
+                      {shouldShowStepTwoError('gender') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.gender}</p>}
                       {gender === 'Other' && (
                         <div className="mt-3 animate-in slide-in-from-top-2 fade-in-50">
+                          <label className="mb-1.5 block text-sm font-medium text-foreground">Please specify <span className="text-red-500">*</span></label>
                           <input
                             value={genderOther}
-                            onChange={e => setGenderOther(e.target.value)}
-                            placeholder="Please specify (optional)"
-                            className={`${registerFieldClass} ${registerFieldSizeClass}`}
+                            onChange={e => {
+                              setActiveStepTwoField('genderOther');
+                              setGenderOther(e.target.value);
+                              setStepTwoErrors(prev => ({ ...prev, genderOther: '' }));
+                            }}
+                            onFocus={() => setActiveStepTwoField('genderOther')}
+                            placeholder="Please specify"
+                            className={`${registerFieldClass} ${registerFieldSizeClass} ${shouldShowStepTwoError('genderOther') ? 'border-red-500 ring-1 ring-red-500/30' : ''}`}
                           />
+                          {shouldShowStepTwoError('genderOther') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.genderOther}</p>}
                         </div>
                       )}
                     </div>
 
                     <div>
                       <label className="mb-1.5 flex items-center gap-1 text-sm font-medium text-foreground">
-                        Blood Group <span className="text-muted-foreground">(optional)</span>
+                        Blood Group <span className="text-red-500">*</span>
                       </label>
                       <Select
                         value={bloodGroup}
-                        onValueChange={val => setBloodGroup(val)}
+                        onValueChange={val => {
+                          setActiveStepTwoField('bloodGroup');
+                          setBloodGroup(val);
+                          setStepTwoErrors(prev => ({ ...prev, bloodGroup: '' }));
+                        }}
                       >
-                        <SelectTrigger className={`min-h-[48px] w-full rounded-xl text-sm font-medium ${isOlderLayout ? 'text-lg' : ''}`}>
+                        <SelectTrigger onFocus={() => setActiveStepTwoField('bloodGroup')} className={`min-h-[48px] w-full rounded-xl text-sm font-medium ${shouldShowStepTwoError('bloodGroup') ? 'border-red-500 ring-1 ring-red-500/30' : ''}`}>
                           <SelectValue placeholder="Select blood group" />
                         </SelectTrigger>
                         <SelectContent className="max-h-60">
@@ -720,47 +835,68 @@ const Auth = () => {
                           You can update this later in your profile.
                         </p>
                       )}
+                      {shouldShowStepTwoError('bloodGroup') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.bloodGroup}</p>}
                     </div>
                   </div>
                 </div>
               )}
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">How tall are you? (cm)</label>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">How tall are you? (cm) <span className="text-red-500">*</span></label>
                 <input
                   value={heightCm}
-                  onChange={e => setHeightCm(e.target.value)}
+                  onChange={e => {
+                    setActiveStepTwoField('heightCm');
+                    setHeightCm(e.target.value);
+                    setStepTwoErrors(prev => ({ ...prev, heightCm: '' }));
+                  }}
+                  onFocus={() => setActiveStepTwoField('heightCm')}
+                  onKeyDown={e => handleEnterFocusNext(e, weightInputRef, 'weightKg')}
                   type="number"
                   min={50}
                   max={250}
-                  className={`${registerFieldClass} ${registerFieldSizeClass}`}
+                  className={`${registerFieldClass} ${registerFieldSizeClass} ${shouldShowStepTwoError('heightCm') ? 'border-red-500 ring-1 ring-red-500/30' : ''}`}
                   placeholder="Example: 165"
                 />
+                {shouldShowStepTwoError('heightCm') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.heightCm}</p>}
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">What is your weight? (kg)</label>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">What is your weight? (kg) <span className="text-red-500">*</span></label>
                 <input
+                  ref={weightInputRef}
                   value={weightKg}
-                  onChange={e => setWeightKg(e.target.value)}
+                  onChange={e => {
+                    setActiveStepTwoField('weightKg');
+                    setWeightKg(e.target.value);
+                    setStepTwoErrors(prev => ({ ...prev, weightKg: '' }));
+                  }}
+                  onFocus={() => setActiveStepTwoField('weightKg')}
+                  onKeyDown={e => handleEnterFocusNext(e, chronicDiseaseInputRef, 'chronicDisease')}
                   type="number"
                   min={20}
                   max={300}
-                  className={`${registerFieldClass} ${registerFieldSizeClass}`}
+                  className={`${registerFieldClass} ${registerFieldSizeClass} ${shouldShowStepTwoError('weightKg') ? 'border-red-500 ring-1 ring-red-500/30' : ''}`}
                   placeholder="Example: 62"
                 />
+                {shouldShowStepTwoError('weightKg') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.weightKg}</p>}
               </div>
 
               <div className={isOlderLayout ? '' : 'sm:col-span-2'}>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">Chronic Diseases</label>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">Chronic Diseases <span className="text-red-500">*</span></label>
                 <input
+                  ref={chronicDiseaseInputRef}
                   value={chronicDiseaseInput}
                   onChange={e => {
+                    setActiveStepTwoField('chronicDisease');
                     const nextValue = e.target.value;
                     setChronicDiseaseInput(nextValue);
                     setChronicDiseases(nextValue.trim() ? [nextValue.trim()] : []);
+                    setStepTwoErrors(prev => ({ ...prev, chronicDisease: '' }));
                   }}
-                  className={`${registerFieldClass} ${registerFieldSizeClass} mb-2`}
+                  onFocus={() => setActiveStepTwoField('chronicDisease')}
+                  onKeyDown={e => handleEnterFocusNext(e, infectionHistoryInputRef, 'infectionHistory')}
+                  className={`${registerFieldClass} ${registerFieldSizeClass} mb-2 ${shouldShowStepTwoError('chronicDisease') ? 'border-red-500 ring-1 ring-red-500/30' : ''}`}
                   placeholder="Type or select a condition"
                 />
                 <div className="flex flex-wrap gap-2">
@@ -768,32 +904,41 @@ const Auth = () => {
                     <button
                       key={option}
                       type="button"
+                      tabIndex={-1}
                       onClick={() => {
+                        setActiveStepTwoField('chronicDisease');
                         setChronicDiseaseInput(option);
                         setChronicDiseases([option]);
+                        setStepTwoErrors(prev => ({ ...prev, chronicDisease: '' }));
                       }}
                       className={`rounded-full border px-3 py-1.5 transition-colors ${
                         chronicDiseaseInput.toLowerCase() === option.toLowerCase()
                           ? 'border-primary bg-accent text-accent-foreground'
                           : 'border-border text-muted-foreground hover:bg-muted'
-                      } ${isOlderLayout ? 'text-[18px] leading-7' : 'text-xs font-semibold'}`}
+                      } text-xs font-semibold`}
                     >
                       {option}
                     </button>
                   ))}
                 </div>
+                {shouldShowStepTwoError('chronicDisease') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.chronicDisease}</p>}
               </div>
 
               <div className={isOlderLayout ? '' : 'sm:col-span-2'}>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">Infection History</label>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">Infection History <span className="text-red-500">*</span></label>
                 <input
+                  ref={infectionHistoryInputRef}
                   value={infectionHistoryInput}
                   onChange={e => {
+                    setActiveStepTwoField('infectionHistory');
                     const nextValue = e.target.value;
                     setInfectionHistoryInput(nextValue);
                     setInfectionHistory(nextValue.trim() ? [nextValue.trim()] : []);
+                    setStepTwoErrors(prev => ({ ...prev, infectionHistory: '' }));
                   }}
-                  className={`${registerFieldClass} ${registerFieldSizeClass} mb-2`}
+                  onFocus={() => setActiveStepTwoField('infectionHistory')}
+                  onKeyDown={e => handleEnterFocusNext(e, emergencyContactInputRef, 'emergencyContactEmail')}
+                  className={`${registerFieldClass} ${registerFieldSizeClass} mb-2 ${shouldShowStepTwoError('infectionHistory') ? 'border-red-500 ring-1 ring-red-500/30' : ''}`}
                   placeholder="Type or select infection history"
                 />
                 <div className="flex flex-wrap gap-2">
@@ -801,72 +946,92 @@ const Auth = () => {
                     <button
                       key={option}
                       type="button"
+                      tabIndex={-1}
                       onClick={() => {
+                        setActiveStepTwoField('infectionHistory');
                         setInfectionHistoryInput(option);
                         setInfectionHistory([option]);
+                        setStepTwoErrors(prev => ({ ...prev, infectionHistory: '' }));
                       }}
                       className={`rounded-full border px-3 py-1.5 transition-colors ${
                         infectionHistoryInput.toLowerCase() === option.toLowerCase()
                           ? 'border-primary bg-accent text-accent-foreground'
                           : 'border-border text-muted-foreground hover:bg-muted'
-                      } ${isOlderLayout ? 'text-[18px] leading-7' : 'text-xs font-semibold'}`}
+                      } text-xs font-semibold`}
                     >
                       {option}
                     </button>
                   ))}
                 </div>
+                {shouldShowStepTwoError('infectionHistory') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.infectionHistory}</p>}
               </div>
 
               <div className={isOlderLayout ? '' : 'sm:col-span-2'}>
-                <label className="mb-1.5 block text-sm font-medium text-foreground">Allergies</label>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">Allergies <span className="text-red-500">*</span></label>
                 <p className="mb-2 text-xs text-muted-foreground">Select none, one, or multiple allergy types.</p>
                 <div className="mb-2 flex flex-wrap gap-2">
                   {allergyCategories.map(category => (
                     <button
                       key={category}
                       type="button"
-                      onClick={() => toggleAllergyCategory(category)}
+                      onClick={() => {
+                        setActiveStepTwoField('allergies');
+                        toggleAllergyCategory(category);
+                      }}
                       className={`rounded-full border px-3 py-1.5 transition-colors ${
                         selectedAllergyCategories.includes(category)
                           ? 'border-primary bg-accent text-accent-foreground'
                           : 'border-border text-muted-foreground hover:bg-muted'
-                      } ${isOlderLayout ? 'text-[18px] leading-7' : 'text-xs font-semibold'}`}
+                      } text-xs font-semibold`}
                     >
                       {category}
                     </button>
                   ))}
                 </div>
 
-                {selectedAllergyCategories.map(category => (
+                {selectedAllergyCategories.map(category => category !== 'None' && (
                   <div key={category} className="mb-2">
                     <label className="mb-1.5 block text-sm font-medium text-foreground">{category} Allergy Details</label>
                     <input
                       value={allergyInputs[category]}
-                      onChange={e =>
+                      onChange={e => {
+                        setActiveStepTwoField('allergyDetails');
                         setAllergyInputs(prev => ({
                           ...prev,
                           [category]: e.target.value,
-                        }))
-                      }
-                      className={`${registerFieldClass} ${registerFieldSizeClass}`}
-                      placeholder={`Enter ${category.toLowerCase()} allergy details (optional)`}
+                        }));
+                        setStepTwoErrors(prev => ({ ...prev, allergyDetails: '' }));
+                      }}
+                      onFocus={() => setActiveStepTwoField('allergyDetails')}
+                      className={`${registerFieldClass} ${registerFieldSizeClass} ${shouldShowStepTwoError('allergyDetails') ? 'border-red-500 ring-1 ring-red-500/30' : ''}`}
+                      placeholder={`Enter ${category.toLowerCase()} allergy details`}
                     />
                   </div>
                 ))}
+                {shouldShowStepTwoError('allergies') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.allergies}</p>}
+                {shouldShowStepTwoError('allergyDetails') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.allergyDetails}</p>}
               </div>
 
               {role === 'patient' && (
                 <div className={isOlderLayout ? '' : 'sm:col-span-2'}>
                   <label className="mb-1.5 block text-sm font-medium text-foreground">
-                    Emergency Contact / Caretaker Email
+                    Emergency Contact / Caretaker Email <span className="text-red-500">*</span>
                   </label>
                   <input
+                    ref={emergencyContactInputRef}
                     value={emergencyContactEmail}
-                    onChange={e => setEmergencyContactEmail(e.target.value)}
-                    type="email"
-                    className={`${registerFieldClass} ${registerFieldSizeClass}`}
-                    placeholder="Who should we alert? (optional)"
+                    onChange={e => {
+                      setActiveStepTwoField('emergencyContactEmail');
+                      setEmergencyContactEmail(e.target.value);
+                      setStepTwoErrors(prev => ({ ...prev, emergencyContactEmail: '' }));
+                    }}
+                    onFocus={() => setActiveStepTwoField('emergencyContactEmail')}
+                    onKeyDown={e => handleEnterFocusNext(e, submitButtonRef, 'emergencyContactEmail')}
+                    type="text"
+                    className={`${registerFieldClass} ${registerFieldSizeClass} ${shouldShowStepTwoError('emergencyContactEmail') ? 'border-red-500 ring-1 ring-red-500/30' : ''}`}
+                    placeholder="Enter phone number or email"
                   />
+                  {shouldShowStepTwoError('emergencyContactEmail') && <p className="mt-1 text-xs font-semibold text-red-600">{stepTwoErrors.emergencyContactEmail}</p>}
                 </div>
               )}
 
@@ -886,7 +1051,7 @@ const Auth = () => {
 
           {mode === 'register' && role === 'patient' && (
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">Preferred Interface</label>
+              <label className="mb-1.5 block text-sm font-medium text-foreground">Preferred Interface <span className="text-red-500">*</span></label>
               <div className="grid gap-2 sm:grid-cols-2">
                 {uiModes.map(modeOption => (
                   <button
@@ -944,7 +1109,7 @@ const Auth = () => {
             </>
           )}
 
-          {mode === 'register' && registerStep === 2 && (
+          {mode === 'register' && registerStep === 2 && role === 'patient' && (
             <button
               type="button"
               onClick={() => setRegisterStep(1)}
@@ -955,6 +1120,7 @@ const Auth = () => {
           )}
 
           <button
+            ref={submitButtonRef}
             type="submit"
             disabled={loading}
             className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-base font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"

@@ -3,41 +3,18 @@ create extension if not exists pgcrypto;
 create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  email text not null unique,
+  email text,
+  phone text unique,
   password text not null,
   role text not null check (role in ('patient', 'caretaker')),
-  gender text,
-  gender_other text,
-  blood_group text,
-  age integer,
-  illness text,
-  date_of_birth date,
-  height_cm integer,
-  weight_kg numeric(6,2),
-  chronic_diseases text[] default '{}',
-  infection_history text[] default '{}',
-  allergies jsonb default '[]'::jsonb,
-  emergency_contact_email text,
-  profile_json jsonb default '{}'::jsonb,
   ui_mode text check (ui_mode in ('younger', 'older')),
   linked_patient_id uuid null references users(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
-alter table users add column if not exists age integer;
-alter table users add column if not exists illness text;
-alter table users add column if not exists gender text;
-alter table users add column if not exists gender_other text;
-alter table users add column if not exists blood_group text;
-alter table users add column if not exists date_of_birth date;
-alter table users add column if not exists height_cm integer;
-alter table users add column if not exists weight_kg numeric(6,2);
-alter table users add column if not exists chronic_diseases text[] default '{}';
-alter table users add column if not exists infection_history text[] default '{}';
-alter table users add column if not exists allergies jsonb default '[]'::jsonb;
-alter table users add column if not exists emergency_contact_email text;
-alter table users add column if not exists profile_json jsonb default '{}'::jsonb;
 alter table users add column if not exists ui_mode text;
+alter table users add column if not exists phone text unique;
+alter table users alter column email drop not null;
 
 create table if not exists medications (
   id uuid primary key default gen_random_uuid(),
@@ -126,19 +103,38 @@ create table if not exists caretaker_patients (
   unique (caretaker_id, patient_id)
 );
 
+create table if not exists caretakers (
+  user_id uuid primary key references users(id) on delete cascade,
+  relation text not null check (relation in ('Family', 'Nurse', 'Doctor', 'Other')),
+  relation_other text,
+  linked_patient_id uuid null references users(id) on delete set null,
+  profile_json jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_caretakers_linked_patient
+  on caretakers (linked_patient_id);
+
+alter table caretakers add column if not exists relation text;
+alter table caretakers add column if not exists relation_other text;
+alter table caretakers add column if not exists linked_patient_id uuid;
+alter table caretakers add column if not exists profile_json jsonb default '{}'::jsonb;
+alter table caretakers alter column relation set not null;
+
 create table if not exists user_health_profiles (
   user_id uuid primary key references users(id) on delete cascade,
-  gender text,
+  gender text not null,
   gender_other text,
-  blood_group text,
-  date_of_birth date,
-  height_cm integer,
-  weight_kg numeric(6,2),
-  chronic_diseases text[] default '{}',
-  infection_history text[] default '{}',
-  allergies jsonb default '[]'::jsonb,
-  emergency_contact_email text,
-  profile_json jsonb default '{}'::jsonb,
+  blood_group text not null,
+  date_of_birth date not null,
+  height_cm integer not null,
+  weight_kg numeric(6,2) not null,
+  chronic_diseases text[] not null default '{}',
+  infection_history text[] not null default '{}',
+  allergies jsonb not null default '[]'::jsonb,
+  emergency_contact_email text not null,
+  profile_json jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -146,58 +142,72 @@ create table if not exists user_health_profiles (
 create index if not exists idx_user_health_profiles_emergency_email
   on user_health_profiles (emergency_contact_email);
 
-alter table user_health_profiles add column if not exists gender text;
-alter table user_health_profiles add column if not exists gender_other text;
-alter table user_health_profiles add column if not exists blood_group text;
-
--- Backfill any already stored health details from users into the new table.
-insert into user_health_profiles (
-  user_id,
-  gender,
-  gender_other,
-  blood_group,
-  date_of_birth,
-  height_cm,
-  weight_kg,
-  chronic_diseases,
-  infection_history,
-  allergies,
-  emergency_contact_email,
-  profile_json
-)
-select
-  id,
-  gender,
-  gender_other,
-  blood_group,
-  date_of_birth,
-  height_cm,
-  weight_kg,
-  coalesce(chronic_diseases, '{}'),
-  coalesce(infection_history, '{}'),
-  coalesce(allergies, '[]'::jsonb),
-  emergency_contact_email,
-  coalesce(profile_json, '{}'::jsonb)
-from users
-on conflict (user_id) do update set
-  gender = excluded.gender,
-  gender_other = excluded.gender_other,
-  blood_group = excluded.blood_group,
-  date_of_birth = excluded.date_of_birth,
-  height_cm = excluded.height_cm,
-  weight_kg = excluded.weight_kg,
-  chronic_diseases = excluded.chronic_diseases,
-  infection_history = excluded.infection_history,
-  allergies = excluded.allergies,
-  emergency_contact_email = excluded.emergency_contact_email,
-  profile_json = excluded.profile_json,
+-- Backfill from profile_json where possible to prevent NOT NULL migration failures.
+update user_health_profiles
+set
+  gender = coalesce(gender, nullif(profile_json ->> 'gender', '')),
+  gender_other = coalesce(gender_other, nullif(profile_json ->> 'genderOther', '')),
+  blood_group = coalesce(blood_group, nullif(profile_json ->> 'bloodGroup', '')),
+  date_of_birth = coalesce(date_of_birth, nullif(profile_json ->> 'dateOfBirth', '')::date),
+  height_cm = coalesce(height_cm, nullif(profile_json ->> 'heightCm', '')::integer),
+  weight_kg = coalesce(weight_kg, nullif(profile_json ->> 'weightKg', '')::numeric),
+  chronic_diseases = coalesce(chronic_diseases, array(select jsonb_array_elements_text(coalesce(profile_json -> 'chronicDiseases', '[]'::jsonb)))),
+  infection_history = coalesce(infection_history, array(select jsonb_array_elements_text(coalesce(profile_json -> 'infectionHistory', '[]'::jsonb)))),
+  allergies = coalesce(allergies, coalesce(profile_json -> 'allergies', '[]'::jsonb)),
+  emergency_contact_email = coalesce(emergency_contact_email, nullif(profile_json ->> 'emergencyContactEmail', '')),
   updated_at = now();
+
+update user_health_profiles
+set
+  chronic_diseases = coalesce(chronic_diseases, '{}'),
+  infection_history = coalesce(infection_history, '{}'),
+  allergies = coalesce(allergies, '[]'::jsonb);
+
+-- Remove only malformed/legacy rows that still violate required health profile fields.
+delete from user_health_profiles
+where
+  gender is null
+  or blood_group is null
+  or date_of_birth is null
+  or height_cm is null
+  or weight_kg is null
+  or chronic_diseases is null
+  or infection_history is null
+  or allergies is null
+  or emergency_contact_email is null;
+
+-- Enforce required patient profile fields.
+alter table user_health_profiles alter column gender set not null;
+alter table user_health_profiles alter column blood_group set not null;
+alter table user_health_profiles alter column date_of_birth set not null;
+alter table user_health_profiles alter column height_cm set not null;
+alter table user_health_profiles alter column weight_kg set not null;
+alter table user_health_profiles alter column chronic_diseases set not null;
+alter table user_health_profiles alter column infection_history set not null;
+alter table user_health_profiles alter column allergies set not null;
+alter table user_health_profiles alter column emergency_contact_email set not null;
 
 alter table users enable row level security;
 alter table medications enable row level security;
 alter table logs enable row level security;
 alter table notifications enable row level security;
 alter table caretaker_patients enable row level security;
+alter table caretakers enable row level security;
+
+-- Drop obsolete columns from users table
+alter table users drop column if exists gender;
+alter table users drop column if exists gender_other;
+alter table users drop column if exists blood_group;
+alter table users drop column if exists age;
+alter table users drop column if exists illness;
+alter table users drop column if exists date_of_birth;
+alter table users drop column if exists height_cm;
+alter table users drop column if exists weight_kg;
+alter table users drop column if exists chronic_diseases;
+alter table users drop column if exists infection_history;
+alter table users drop column if exists allergies;
+alter table users drop column if exists emergency_contact_email;
+alter table users drop column if exists profile_json;
 alter table user_health_profiles enable row level security;
 
 drop policy if exists users_select_all on users;
@@ -220,6 +230,9 @@ create policy notifications_all on notifications for all using (true) with check
 
 drop policy if exists caretaker_patients_all on caretaker_patients;
 create policy caretaker_patients_all on caretaker_patients for all using (true) with check (true);
+
+drop policy if exists caretakers_all on caretakers;
+create policy caretakers_all on caretakers for all using (true) with check (true);
 
 drop policy if exists user_health_profiles_all on user_health_profiles;
 create policy user_health_profiles_all on user_health_profiles for all using (true) with check (true);
