@@ -226,7 +226,7 @@ const Auth = () => {
 
     toast({
       title: 'OTP sent',
-      description: 'Development mode: OTP is shown below the field on this page.',
+      description: 'Development mode: OTP is shown below this field on the page.',
     });
   };
 
@@ -406,7 +406,7 @@ const Auth = () => {
         ? await register({
             name,
             phoneNumber: normalizedPhoneNumber,
-            password,
+          password,
             role,
           gender,
           genderOther: gender === 'Other' ? genderOther.trim() : undefined,
@@ -671,7 +671,7 @@ const Auth = () => {
                   <input
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    type={showPassword ? "text" : "password"}
+                    type={showPassword ? 'text' : 'password'}
                     required
                     minLength={8}
                     className={`${registerFieldClass} ${registerFieldSizeClass} pr-10`}
@@ -1091,9 +1091,9 @@ const Auth = () => {
                   <input
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    type={showPassword ? "text" : "password"}
+                    type={showPassword ? 'text' : 'password'}
                     required
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20 pr-10"
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2.5 pr-10 text-base text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
                     placeholder="Password"
                   />
                   <button
