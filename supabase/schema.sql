@@ -20,6 +20,10 @@ create table if not exists medications (
   id uuid primary key default gen_random_uuid(),
   patient_id uuid not null references users(id) on delete cascade,
   drug_name text not null,
+  display_name text,
+  generic_name text,
+  who_essential boolean,
+  who_risk_tier text check (who_risk_tier in ('medium', 'high')),
   dosage text not null,
   photo_url text,
   food_timing text not null default 'before-food' check (food_timing in ('before-food', 'after-food')),
@@ -32,6 +36,10 @@ create table if not exists medications (
 
 alter table medications add column if not exists photo_url text;
 alter table medications add column if not exists food_timing text not null default 'before-food';
+alter table medications add column if not exists display_name text;
+alter table medications add column if not exists generic_name text;
+alter table medications add column if not exists who_essential boolean;
+alter table medications add column if not exists who_risk_tier text;
 
 create table if not exists logs (
   id uuid primary key default gen_random_uuid(),

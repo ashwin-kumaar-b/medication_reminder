@@ -4,7 +4,9 @@ import { useMedicines } from '@/contexts/MedicineContext';
 import {
   getFoodNutritionProfileInsight,
   getGeminiMedicalAdvice,
+  getMedlinePlusDrugInfoByRxCui,
   getOpenFdaSafety,
+  getRxCui,
   inferFoodRiskFromOpenFda,
   parseInputList,
   searchUsdaFood,
@@ -12,6 +14,7 @@ import {
 } from '@/lib/medicationApis';
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { getMedicineDetailsByName } from '@/lib/localMedicineData';
 
 const FoodCheck = () => {
   const { medicines } = useMedicines();
@@ -32,6 +35,13 @@ const FoodCheck = () => {
     [medicines],
   );
 
+  const getAggregatedMedicineUses = async (names: string[]) => {
+    const details = await Promise.all(names.map(name => getMedicineDetailsByName(name)));
+    return Array.from(
+      new Set(details.flatMap(item => item?.uses || []).filter(Boolean)),
+    ).slice(0, 8);
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -44,6 +54,7 @@ const FoodCheck = () => {
         .filter(Boolean);
 
       const medicinePool = activeMedicineNames.length > 0 ? activeMedicineNames : Array.from(new Set(medicines.map(item => item.name).filter(Boolean)));
+      const medicineUses = await getAggregatedMedicineUses(medicinePool);
 
       if (medicinePool.length === 0) {
         if (!cancelled) {
@@ -66,6 +77,7 @@ const FoodCheck = () => {
         chronicDiseases,
         infectionHistory,
         allergies: allergyLabels,
+        medicineUses,
       });
 
       if (cancelled) return;
@@ -91,10 +103,14 @@ const FoodCheck = () => {
     setLoading(true);
     setNutritionInsight(null);
 
-    const [foodMatch, openFda] = await Promise.all([
+    const [foodMatch, openFda, rxcui] = await Promise.all([
       searchUsdaFood(food),
       getOpenFdaSafety(medName),
+      getRxCui(medName),
     ]);
+
+    const medlineInfo = rxcui ? await getMedlinePlusDrugInfoByRxCui(rxcui) : null;
+    const medicineDetails = await getMedicineDetailsByName(medName);
 
     const inferred = inferFoodRiskFromOpenFda(openFda, food);
     const foodLabel = foodMatch ? `${foodMatch.name}${foodMatch.category ? ` (${foodMatch.category})` : ''}` : food;
@@ -115,6 +131,7 @@ const FoodCheck = () => {
       chronicDiseases,
       infectionHistory,
       allergies: allergyLabels,
+      medicineUses: medicineDetails?.uses || [],
     });
 
     const geminiAdvice = await getGeminiMedicalAdvice({
@@ -123,19 +140,29 @@ const FoodCheck = () => {
       food,
       supplements: supplementsList,
       symptoms: symptomList,
-      evidence: [inferred.summary, ...(inferred.evidence || [])],
+      evidence: [
+        inferred.summary,
+        ...(inferred.evidence || []),
+        ...(medicineDetails?.uses?.map(item => `Medicine use: ${item}`) || []),
+        ...(medlineInfo?.foodInteractionLines || []),
+        ...(medlineInfo?.plainEnglishLines || []).slice(0, 2),
+      ],
     });
 
     const nutritionAdvice = await nutritionPromise;
     setNutritionInsight(nutritionAdvice);
 
-    const mappedSeverity = geminiAdvice
+    const mappedSeverity: 'high' | 'moderate' | 'safe' = geminiAdvice
       ? geminiAdvice.severity === 'high'
         ? 'high'
         : geminiAdvice.severity === 'moderate'
           ? 'moderate'
           : 'safe'
-      : inferred.severity;
+      : inferred.severity === 'high'
+        ? 'high'
+        : inferred.severity === 'moderate'
+          ? 'moderate'
+          : 'safe';
 
     const recommendations = geminiAdvice?.recommendations?.filter(Boolean) || [];
     const cautions = geminiAdvice?.cautions?.filter(Boolean) || [];
@@ -144,14 +171,16 @@ const FoodCheck = () => {
       severity: mappedSeverity,
       desc: geminiAdvice
         ? `${geminiAdvice.summary} ${geminiAdvice.explanation}`.trim()
-        : `${inferred.summary} USDA match: ${foodLabel}.`,
+        : `${inferred.summary} USDA match: ${foodLabel}.${medlineInfo?.foodInteractionLines?.[0] ? ` MedlinePlus: ${medlineInfo.foodInteractionLines[0]}` : ''}`,
       alt: recommendations[0] || cautions[0] ||
         (mappedSeverity === 'high'
           ? 'Avoid this combination until discussed with your healthcare provider.'
           : mappedSeverity === 'moderate'
             ? 'Use caution and verify timing with your provider or pharmacist.'
             : 'No direct match found, but continue following prescribed guidance.'),
-      source: geminiAdvice ? `${geminiAdvice.source} + USDA + OpenFDA${foodMatch ? '' : ' (food match unavailable)'}` : `USDA + OpenFDA${foodMatch ? '' : ' (food match unavailable)'}`,
+      source: geminiAdvice
+        ? `${geminiAdvice.source} + USDA + DailyMed + MedlinePlus + Medicine Details${foodMatch ? '' : ' (food match unavailable)'}`
+        : `USDA + DailyMed + MedlinePlus + Medicine Details${foodMatch ? '' : ' (food match unavailable)'}`,
     });
 
     setLoading(false);

@@ -14,12 +14,13 @@ import {
 } from '@/lib/medicationApis';
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { getMedicineDetailsByName } from '@/lib/localMedicineData';
 
 interface InteractionResult {
   severity: 'high' | 'moderate' | 'low' | 'none';
   description: string;
   drugs: string[];
-  source?: 'RxNav' | 'OpenFDA' | 'Gemini' | 'DDInter' | 'Groq';
+  source?: 'RxNav' | 'DailyMed' | 'Gemini' | 'DDInter' | 'Groq';
 }
 
 const severityConfig = {
@@ -39,6 +40,7 @@ const InteractionChecker = () => {
   const [loading, setLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileInsight, setProfileInsight] = useState<DrugAllergyProfileInsight | null>(null);
+  const [localSideEffects, setLocalSideEffects] = useState<Array<{ medicine: string; effects: string[] }>>([]);
   const [results, setResults] = useState<InteractionResult[]>([]);
   const [checked, setChecked] = useState(false);
   const { toast } = useToast();
@@ -101,7 +103,7 @@ const InteractionChecker = () => {
         severity: warning.toLowerCase().includes('contraindicated') ? 'high' : 'moderate',
         description: warning,
         drugs: [leftDrug, rightDrug],
-        source: 'OpenFDA',
+        source: 'DailyMed',
       });
     });
 
@@ -110,7 +112,7 @@ const InteractionChecker = () => {
       `RxNorm lookup ${rightDrug}: ${rxcui2 || 'not found'}`,
       ...(rxNavItems.length > 0 ? rxNavItems.map(item => `RxNav: ${item.description}`) : ['RxNav: no interaction records found or RxCUI unavailable.']),
       ...(ddinterItems.length > 0 ? ddinterItems.map(item => `DDInter: ${item.description}`) : ['DDInter: no interaction records returned.']),
-      ...(openFdaWarnings.length > 0 ? openFdaWarnings.map(warning => `OpenFDA: ${warning}`) : ['OpenFDA: no warning or contraindication text returned.']),
+      ...(openFdaWarnings.length > 0 ? openFdaWarnings.map(warning => `DailyMed: ${warning}`) : ['DailyMed: no warning or contraindication text returned.']),
     ].slice(0, 12);
 
     const geminiAdvice = await getGeminiMedicalAdvice({
@@ -181,6 +183,31 @@ const InteractionChecker = () => {
 
     setResults([]);
     setChecked(false);
+  }, [activeMedicineNames]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadLocalDetails = async () => {
+      const detailRows = await Promise.all(
+        activeMedicineNames.map(async medicine => {
+          const details = await getMedicineDetailsByName(medicine);
+          return {
+            medicine,
+            effects: details?.sideEffects?.slice(0, 3) || [],
+          };
+        }),
+      );
+
+      if (!active) return;
+      setLocalSideEffects(detailRows.filter(row => row.effects.length > 0));
+    };
+
+    void loadLocalDetails();
+
+    return () => {
+      active = false;
+    };
   }, [activeMedicineNames]);
 
   const handleCheck = async (e: React.FormEvent) => {
@@ -304,6 +331,18 @@ const InteractionChecker = () => {
               </ul>
             )}
             <p className="mt-2 text-xs text-muted-foreground">Based on FDA drug label data.</p>
+            {localSideEffects.length > 0 && (
+              <div className="mt-3 rounded-md border border-border bg-card p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Medicine details side effects</p>
+                <div className="mt-2 space-y-1">
+                  {localSideEffects.map(row => (
+                    <p key={row.medicine} className="text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground">{row.medicine}:</span> {row.effects.join(', ')}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
             <p className="mt-2 text-xs text-muted-foreground">Source: {profileInsight.source}</p>
           </div>
         )}

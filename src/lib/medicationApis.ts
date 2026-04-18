@@ -3,6 +3,9 @@ const USDA_API_KEY = import.meta.env.VITE_USDA_API_KEY as string | undefined;
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY as string | undefined;
 const DDINTER_API_URL = import.meta.env.VITE_DDINTER_API_URL as string | undefined;
+const DAILYMED_BASE_URL = 'https://dailymed.nlm.nih.gov/dailymed/services/v2';
+const FAERS_BASE_URL = 'https://api.fda.gov/drug/event.json';
+const MEDLINEPLUS_CONNECT_URL = 'https://connect.medlineplus.gov/service';
 
 const ALLOWED_RXNAV_TTYS = new Set(['IN', 'PIN', 'MIN', 'SCD', 'SBD', 'SCDC', 'SBDC']);
 
@@ -31,6 +34,13 @@ export interface OpenFdaSafety {
 export interface UsdaFoodMatch {
   name: string;
   category?: string;
+}
+
+export interface MedlinePlusDrugInfo {
+  rxcui: string;
+  foodInteractionLines: string[];
+  plainEnglishLines: string[];
+  sourceUrl?: string;
 }
 
 export interface GeminiMedicalAdvice {
@@ -72,7 +82,7 @@ export interface MissedDoseSeverityInsight {
   guidance: string;
   riskProgression: string;
   missesUntilWorse: number | null;
-  source: 'OpenFDA' | 'OpenFDA + Groq';
+  source: 'DailyMed' | 'DailyMed + Groq';
 }
 
 export interface MissedDoseRecoveryInput {
@@ -99,7 +109,7 @@ export interface MissedDoseRecoveryAdvice {
   foodTimingInstruction: string;
   monitoringNotes: string[];
   confidence: 'high' | 'medium' | 'low';
-  source: 'OpenFDA' | 'OpenFDA + Groq' | 'Schedule Rule' | 'Schedule Rule + Groq';
+  source: 'DailyMed' | 'DailyMed + Groq' | 'Schedule Rule' | 'Schedule Rule + Groq';
 }
 
 export interface DrugAllergyProfileInput {
@@ -128,6 +138,7 @@ export interface DrugAllergyProfileInsight {
 export interface FoodNutritionProfileInput {
   language?: 'en' | 'es' | 'fr' | 'ta' | 'te' | 'hi';
   medicines: string[];
+  medicineUses?: string[];
   illness?: string[];
   chronicDiseases?: string[];
   infectionHistory?: string[];
@@ -276,6 +287,179 @@ const getOpenFdaSearchTerms = (drugName: string) => {
   return Array.from(unique).slice(0, 4);
 };
 
+const toLines = (value: unknown): string[] => {
+  if (typeof value === 'string') {
+    const normalized = clean(value);
+    return normalized ? [normalized] : [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap(item => toLines(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).flatMap(item => toLines(item));
+  }
+
+  return [];
+};
+
+const getDailyMedSectionLines = (payload: unknown, sectionAliases: string[], maxItems = 3): string[] => {
+  const normalizedAliases = new Set(sectionAliases.map(alias => alias.toLowerCase().replace(/[^a-z0-9]/g, '')));
+  const lines: string[] = [];
+
+  const visit = (node: unknown) => {
+    if (!node || typeof node !== 'object' || lines.length >= maxItems) return;
+
+    if (Array.isArray(node)) {
+      node.forEach(item => visit(item));
+      return;
+    }
+
+    const record = node as Record<string, unknown>;
+    Object.entries(record).forEach(([key, value]) => {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (normalizedAliases.has(normalizedKey) && lines.length < maxItems) {
+        toLines(value).forEach(line => {
+          if (lines.length < maxItems && !lines.includes(line)) {
+            lines.push(line);
+          }
+        });
+      }
+
+      if (value && typeof value === 'object') {
+        visit(value);
+      }
+    });
+  };
+
+  visit(payload);
+  return lines.slice(0, maxItems);
+};
+
+const fetchDailyMedLabelPayload = async (drugName: string): Promise<unknown | null> => {
+  const terms = getOpenFdaSearchTerms(drugName);
+
+  for (const term of terms) {
+    const encodedTerm = encodeURIComponent(term);
+    try {
+      const [splsResponse, drugsResponse] = await Promise.all([
+        fetch(`${DAILYMED_BASE_URL}/spls.json?drug_name=${encodedTerm}`),
+        fetch(`${DAILYMED_BASE_URL}/drugs.json?drug_name=${encodedTerm}`),
+      ]);
+
+      const candidates: unknown[] = [];
+      if (splsResponse.ok) {
+        const spls = await splsResponse.json();
+        candidates.push(spls);
+      }
+      if (drugsResponse.ok) {
+        const drugs = await drugsResponse.json();
+        candidates.push(drugs);
+      }
+
+      const best = candidates.find(payload => {
+        const warnings = getDailyMedSectionLines(payload, ['warnings', 'warnings_and_cautions', 'warningsandcautions', 'boxed_warning', 'boxedwarning'], 1);
+        const contraindications = getDailyMedSectionLines(payload, ['contraindications'], 1);
+        const dosage = getDailyMedSectionLines(payload, ['dosage_and_administration', 'dosageandadministration'], 1);
+        return warnings.length > 0 || contraindications.length > 0 || dosage.length > 0;
+      });
+
+      if (best) return best;
+      if (candidates.length > 0) return candidates[0];
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+};
+
+const fetchFaersReactionSignals = async (drugName: string): Promise<Array<{ reaction: string; count: number }>> => {
+  const terms = getOpenFdaSearchTerms(drugName);
+  const reactionCounts = new Map<string, number>();
+
+  for (const term of terms) {
+    const escaped = term.replace(/"/g, '');
+    const query = `patient.drug.medicinalproduct:"${escaped}"`;
+    const keyPart = OPENFDA_API_KEY ? `&api_key=${encodeURIComponent(OPENFDA_API_KEY)}` : '';
+    const url = `${FAERS_BASE_URL}?search=${encodeURIComponent(query)}&count=${encodeURIComponent('patient.reaction.reactionmeddrapt.exact')}${keyPart}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) continue;
+
+      const payload = await response.json();
+      const results = Array.isArray(payload?.results) ? payload.results : [];
+      results.slice(0, 20).forEach((entry: any) => {
+        const reaction = clean(entry?.term || entry?.name);
+        const count = Number(entry?.count || 0);
+        if (!reaction || !Number.isFinite(count) || count <= 0) return;
+        reactionCounts.set(reaction, (reactionCounts.get(reaction) || 0) + count);
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  return Array.from(reactionCounts.entries())
+    .map(([reaction, count]) => ({ reaction, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
+};
+
+export const getMedlinePlusDrugInfoByRxCui = async (rxcui: string): Promise<MedlinePlusDrugInfo | null> => {
+  const normalizedRxCui = clean(rxcui);
+  if (!normalizedRxCui) return null;
+
+  const url = `${MEDLINEPLUS_CONNECT_URL}?mainSearchCriteria.v.cs=${encodeURIComponent('2.16.840.1.113883.6.88')}&mainSearchCriteria.v.c=${encodeURIComponent(normalizedRxCui)}&knowledgeResponseType=${encodeURIComponent('application/json')}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const payload = await response.json();
+    const entries = Array.isArray(payload?.feed?.entry)
+      ? payload.feed.entry
+      : payload?.feed?.entry
+      ? [payload.feed.entry]
+      : [];
+
+    const allTextLines = entries
+      .flatMap((entry: any) => {
+        const titleLines = toLines(entry?.title);
+        const summaryLines = toLines(entry?.summary);
+        const contentLines = toLines(entry?.content);
+        return [...titleLines, ...summaryLines, ...contentLines];
+      })
+      .map(line => clean(line))
+      .filter(Boolean)
+      .filter(line => line.length >= 20)
+      .slice(0, 40);
+
+    const uniqueLines: string[] = Array.from(new Set<string>(allTextLines));
+    const foodInteractionLines = uniqueLines
+      .filter(line => /(food|meal|eat|diet|drink|alcohol|grapefruit|empty stomach|with food|without food)/i.test(line))
+      .slice(0, 4);
+
+    const plainEnglishLines = uniqueLines.slice(0, 5);
+    const sourceUrl = entries
+      .flatMap((entry: any) => toLines(entry?.link))
+      .find((value: string) => value.startsWith('http'));
+
+    if (foodInteractionLines.length === 0 && plainEnglishLines.length === 0) return null;
+
+    return {
+      rxcui: normalizedRxCui,
+      foodInteractionLines,
+      plainEnglishLines,
+      sourceUrl,
+    };
+  } catch {
+    return null;
+  }
+};
+
 const isNoisySuggestion = (name: string) => {
   const lower = name.toLowerCase();
   return lower.includes('{') || lower.includes('}') || lower.includes(' pack') || lower.length > 90;
@@ -290,6 +474,71 @@ const getSuggestionScore = (name: string, term: string) => {
   if (normalizedName.includes(` ${normalizedTerm}`)) return 60;
   if (normalizedName.includes(normalizedTerm)) return 40;
   return 10;
+};
+
+const RXNORM_RELATED_TTY_PRIORITY = ['IN', 'PIN', 'MIN', 'SCD', 'SBD', 'SCDC', 'SBDC'];
+
+const extractPreferredRelatedRxCui = (payload: any): string | null => {
+  const groups = Array.isArray(payload?.allRelatedGroup?.conceptGroup) ? payload.allRelatedGroup.conceptGroup : [];
+
+  for (const tty of RXNORM_RELATED_TTY_PRIORITY) {
+    const match = groups.find((group: any) => group?.tty === tty && Array.isArray(group?.conceptProperties) && group.conceptProperties.length > 0);
+    const rxcui = clean(match?.conceptProperties?.[0]?.rxcui);
+    if (rxcui) return rxcui;
+  }
+
+  return null;
+};
+
+const fetchRxNormAllRelated = async (rxcui: string): Promise<any | null> => {
+  try {
+    const response = await fetch(`https://rxnav.nlm.nih.gov/REST/rxcui/${encodeURIComponent(rxcui)}/allrelated.json`);
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+};
+
+const getOncHighPairInteractions = async (rxcuiA: string, rxcuiB: string): Promise<RxNavInteraction[]> => {
+  const seen = new Set<string>();
+  const output: RxNavInteraction[] = [];
+
+  const collectFor = async (anchor: string, other: string) => {
+    try {
+      const response = await fetch(
+        `https://rxnav.nlm.nih.gov/REST/interaction/interaction.json?rxcui=${encodeURIComponent(anchor)}&sources=ONCHigh`,
+      );
+      if (!response.ok) return;
+
+      const payload = await response.json();
+      const groups = Array.isArray(payload?.interactionTypeGroup) ? payload.interactionTypeGroup : [];
+
+      groups.forEach((group: any) => {
+        (Array.isArray(group?.interactionType) ? group.interactionType : []).forEach((item: any) => {
+          (Array.isArray(item?.interactionPair) ? item.interactionPair : []).forEach((pair: any) => {
+            const concepts = Array.isArray(pair?.interactionConcept) ? pair.interactionConcept : [];
+            const rxcuis = concepts.map((concept: any) => clean(concept?.minConceptItem?.rxcui)).filter(Boolean);
+            if (!rxcuis.includes(anchor) || !rxcuis.includes(other)) return;
+
+            const description = clean(pair?.description || item?.comment);
+            if (!description) return;
+
+            const severity = normalizeSeverity(pair?.severity || item?.severity || item?.minConcept?.tty);
+            const key = `${severity}:${description}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            output.push({ severity, description });
+          });
+        });
+      });
+    } catch {
+      // Ignore ONCHigh enrichment errors and keep core RxNav output.
+    }
+  };
+
+  await Promise.all([collectFor(rxcuiA, rxcuiB), collectFor(rxcuiB, rxcuiA)]);
+  return output.slice(0, 6);
 };
 
 export const searchRxNavSuggestions = async (term: string): Promise<DrugSuggestion[]> => {
@@ -335,14 +584,52 @@ export const searchRxNavSuggestions = async (term: string): Promise<DrugSuggesti
 };
 
 export const getRxCui = async (drugName: string): Promise<string | null> => {
-  try {
-    const response = await fetch(`https://rxnav.nlm.nih.gov/REST/rxcui.json?name=${encodeURIComponent(drugName)}`);
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data?.idGroup?.rxnormId?.[0] || null;
-  } catch {
-    return null;
-  }
+  const normalizedDrugName = clean(drugName);
+  if (!normalizedDrugName) return null;
+
+  const getRawRxCui = async (name: string, includeApproximate: boolean) => {
+    try {
+      const query = includeApproximate
+        ? `https://rxnav.nlm.nih.gov/REST/rxcui.json?name=${encodeURIComponent(name)}&search=1`
+        : `https://rxnav.nlm.nih.gov/REST/rxcui.json?name=${encodeURIComponent(name)}`;
+      const response = await fetch(query);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return clean(data?.idGroup?.rxnormId?.[0]) || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const rawRxCui = (await getRawRxCui(normalizedDrugName, true)) || (await getRawRxCui(normalizedDrugName, false));
+  if (!rawRxCui) return null;
+
+  const related = await fetchRxNormAllRelated(rawRxCui);
+  const preferred = extractPreferredRelatedRxCui(related);
+  return preferred || rawRxCui;
+};
+
+export const getRxNormAllRelatedInfo = async (rxcui: string): Promise<Array<{ tty: string; rxcui: string; name: string }>> => {
+  const normalizedRxCui = clean(rxcui);
+  if (!normalizedRxCui) return [];
+
+  const related = await fetchRxNormAllRelated(normalizedRxCui);
+  const groups = Array.isArray(related?.allRelatedGroup?.conceptGroup) ? related.allRelatedGroup.conceptGroup : [];
+
+  return groups
+    .flatMap((group: any) => {
+      const tty = clean(group?.tty);
+      if (!tty || !Array.isArray(group?.conceptProperties)) return [];
+
+      return group.conceptProperties
+        .map((entry: any) => ({
+          tty,
+          rxcui: clean(entry?.rxcui),
+          name: clean(entry?.name),
+        }))
+        .filter((entry: { tty: string; rxcui: string; name: string }) => !!entry.rxcui && !!entry.name);
+    })
+    .slice(0, 40);
 };
 
 export const getRxNavInteractions = async (rxcuiA: string, rxcuiB: string): Promise<RxNavInteraction[]> => {
@@ -375,7 +662,15 @@ export const getRxNavInteractions = async (rxcuiA: string, rxcuiB: string): Prom
     });
   });
 
-  return output.slice(0, 10);
+  const onchighItems = await getOncHighPairInteractions(rxcuiA, rxcuiB);
+  const merged = [...onchighItems, ...output];
+  const deduped = new Map<string, RxNavInteraction>();
+  merged.forEach(item => {
+    const key = `${item.severity}:${item.description.toLowerCase()}`;
+    if (!deduped.has(key)) deduped.set(key, item);
+  });
+
+  return Array.from(deduped.values()).slice(0, 12);
 };
 
 export const getDdinterInteractions = async (drugA: string, drugB: string): Promise<DdinterInteraction[]> => {
@@ -408,39 +703,13 @@ export const getDdinterInteractions = async (drugA: string, drugB: string): Prom
 };
 
 export const getOpenFdaSafety = async (drugName: string): Promise<OpenFdaSafety | null> => {
-  if (!OPENFDA_API_KEY) return null;
-
-  const terms = getOpenFdaSearchTerms(drugName);
-  let label: any = null;
-
-  for (const term of terms) {
-    const escaped = term.replace(/"/g, '');
-    const query = [
-      `openfda.brand_name:"${escaped}"`,
-      `openfda.generic_name:"${escaped}"`,
-      `openfda.substance_name:"${escaped}"`,
-    ].join('+OR+');
-
-    try {
-      const response = await fetch(
-        `https://api.fda.gov/drug/label.json?api_key=${encodeURIComponent(OPENFDA_API_KEY)}&search=${encodeURIComponent(query)}&limit=1`,
-      );
-      if (!response.ok) continue;
-
-      const data = await response.json();
-      label = data?.results?.[0] || null;
-      if (label) break;
-    } catch {
-      continue;
-    }
-  }
-
+  const label = await fetchDailyMedLabelPayload(drugName);
   if (!label) return null;
 
   return {
-    warnings: (label.warnings || []).map((item: string) => clean(item)).filter(Boolean).slice(0, 3),
-    contraindications: (label.contraindications || []).map((item: string) => clean(item)).filter(Boolean).slice(0, 3),
-    foodInteractions: (label.food_interactions || []).map((item: string) => clean(item)).filter(Boolean).slice(0, 3),
+    warnings: getDailyMedSectionLines(label, ['warnings', 'warnings_and_cautions', 'warningsandcautions', 'boxed_warning', 'boxedwarning'], 3),
+    contraindications: getDailyMedSectionLines(label, ['contraindications'], 3),
+    foodInteractions: getDailyMedSectionLines(label, ['food_interactions', 'foodinteractions', 'drug_and_food_interactions', 'drugfoodinteractions'], 3),
   };
 };
 
@@ -466,7 +735,7 @@ export const inferFoodRiskFromOpenFda = (safety: OpenFdaSafety | null, foodQuery
   if (!safety) {
     return {
       severity: 'safe' as const,
-      summary: 'OpenFDA label data was not available for this medication query, so no warning-level classification was applied.',
+      summary: 'DailyMed label data was not available for this medication query, so no warning-level classification was applied.',
       evidence: [],
     };
   }
@@ -478,7 +747,7 @@ export const inferFoodRiskFromOpenFda = (safety: OpenFdaSafety | null, foodQuery
   if (hits.length === 0) {
     return {
       severity: 'safe' as const,
-      summary: 'No direct food-specific warnings matched your query in OpenFDA label sections.',
+      summary: 'No direct food-specific warnings matched your query in DailyMed label sections.',
       evidence: combined.slice(0, 2),
     };
   }
@@ -632,7 +901,7 @@ export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise
 export const getMissedDoseSeverityInsight = async (
   input: MissedDoseSeverityInput,
 ): Promise<MissedDoseSeverityInsight | null> => {
-  if (!input.missed.length || !OPENFDA_API_KEY) return null;
+  if (!input.missed.length) return null;
 
   const languageNameByCode: Record<NonNullable<MissedDoseSeverityInput['language']>, string> = {
     en: 'English',
@@ -649,39 +918,9 @@ export const getMissedDoseSeverityInsight = async (
 
   const fdaByMedicine = await Promise.all(
     uniqueMedicines.map(async medName => {
-      const terms = getOpenFdaSearchTerms(medName);
-      let label: any = null;
-
-      for (const term of terms) {
-        const escaped = term.replace(/"/g, '');
-        const query = [
-          `openfda.brand_name:"${escaped}"`,
-          `openfda.generic_name:"${escaped}"`,
-          `openfda.substance_name:"${escaped}"`,
-        ].join('+OR+');
-
-        try {
-          const response = await fetch(
-            `https://api.fda.gov/drug/label.json?api_key=${encodeURIComponent(OPENFDA_API_KEY)}&search=${encodeURIComponent(query)}&limit=1`,
-          );
-          if (!response.ok) continue;
-
-          const data = await response.json();
-          label = data?.results?.[0] || null;
-          if (label) break;
-        } catch {
-          continue;
-        }
-      }
-
-      const boxedWarnings = (label?.boxed_warning || [])
-        .map((item: string) => clean(item))
-        .filter(Boolean)
-        .slice(0, 2);
-      const warnings = (label?.warnings || [])
-        .map((item: string) => clean(item))
-        .filter(Boolean)
-        .slice(0, 2);
+      const label = await fetchDailyMedLabelPayload(medName);
+      const boxedWarnings = getDailyMedSectionLines(label, ['boxed_warning', 'boxedwarning'], 2);
+      const warnings = getDailyMedSectionLines(label, ['warnings', 'warnings_and_cautions', 'warningsandcautions'], 2);
 
       return {
         medName,
@@ -735,7 +974,7 @@ export const getMissedDoseSeverityInsight = async (
       guidance: defaultGuidance,
       riskProgression,
       missesUntilWorse,
-      source: 'OpenFDA',
+      source: 'DailyMed',
     };
   }
 
@@ -777,7 +1016,7 @@ export const getMissedDoseSeverityInsight = async (
         guidance: defaultGuidance,
         riskProgression,
         missesUntilWorse,
-        source: 'OpenFDA',
+        source: 'DailyMed',
       };
     }
     const payload = await response.json();
@@ -791,7 +1030,7 @@ export const getMissedDoseSeverityInsight = async (
       guidance: simplifiedSentence || defaultGuidance,
       riskProgression,
       missesUntilWorse,
-      source: 'OpenFDA + Groq',
+      source: 'DailyMed + Groq',
     };
   } catch {
     return {
@@ -800,7 +1039,7 @@ export const getMissedDoseSeverityInsight = async (
       guidance: defaultGuidance,
       riskProgression,
       missesUntilWorse,
-      source: 'OpenFDA',
+      source: 'DailyMed',
     };
   }
 };
@@ -873,36 +1112,9 @@ export const getMissedDoseRecoveryAdvice = async (
       : 'Rule-based schedule guidance: more than half the dosing interval has passed, so skip the missed dose and resume the next scheduled dose.';
   let source: MissedDoseRecoveryAdvice['source'] = 'Schedule Rule';
 
-  if (OPENFDA_API_KEY) {
-    const terms = getOpenFdaSearchTerms(input.medication.drugName);
-    let label: any = null;
-
-    for (const term of terms) {
-      const escaped = term.replace(/"/g, '');
-      const query = [
-        `openfda.brand_name:"${escaped}"`,
-        `openfda.generic_name:"${escaped}"`,
-        `openfda.substance_name:"${escaped}"`,
-      ].join('+OR+');
-
-      try {
-        const response = await fetch(
-          `https://api.fda.gov/drug/label.json?api_key=${encodeURIComponent(OPENFDA_API_KEY)}&search=${encodeURIComponent(query)}&limit=1`,
-        );
-        if (!response.ok) continue;
-
-        const data = await response.json();
-        label = data?.results?.[0] || null;
-        if (label) break;
-      } catch {
-        continue;
-      }
-    }
-
-    const dosageLines = (label?.dosage_and_administration || [])
-      .map((item: string) => clean(item))
-      .filter(Boolean)
-      .slice(0, 3);
+  {
+    const label = await fetchDailyMedLabelPayload(input.medication.drugName);
+    const dosageLines = getDailyMedSectionLines(label, ['dosage_and_administration', 'dosageandadministration', 'dosage', 'administration'], 3);
 
     if (dosageLines.length > 0) {
       const missedDoseLine = dosageLines.find(line => /missed dose|as soon as|next dose|skip|double/i.test(line)) || dosageLines[0];
@@ -923,7 +1135,7 @@ export const getMissedDoseRecoveryAdvice = async (
       }
 
       technicalRationale = `FDA dosage and administration guidance: ${missedDoseLine}`;
-      source = 'OpenFDA';
+      source = 'DailyMed';
     }
   }
 
@@ -1004,7 +1216,7 @@ export const getMissedDoseRecoveryAdvice = async (
       foodTimingInstruction: friendlyFoodTiming,
       monitoringNotes: friendlyMonitoring,
       confidence,
-      source: source === 'OpenFDA' ? 'OpenFDA + Groq' : 'Schedule Rule + Groq',
+      source: source === 'DailyMed' ? 'DailyMed + Groq' : 'Schedule Rule + Groq',
     };
   } catch {
     return {
@@ -1045,50 +1257,18 @@ export const getDrugAllergyProfileInsight = async (
   const normalizedGender = clean(input.gender);
   const normalizedBloodGroup = clean(input.bloodGroup);
 
-  if (!OPENFDA_API_KEY) {
-    return null;
-  }
-
   const fdaGroundingByMedicine = await Promise.all(
     input.medicines.slice(0, 6).map(async medName => {
-      const terms = getOpenFdaSearchTerms(medName);
-      let label: any = null;
-
-      for (const term of terms) {
-        const escaped = term.replace(/"/g, '');
-        const query = [
-          `openfda.brand_name:"${escaped}"`,
-          `openfda.generic_name:"${escaped}"`,
-          `openfda.substance_name:"${escaped}"`,
-        ].join('+OR+');
-
-        try {
-          const response = await fetch(
-            `https://api.fda.gov/drug/label.json?api_key=${encodeURIComponent(OPENFDA_API_KEY)}&search=${encodeURIComponent(query)}&limit=1`,
-          );
-          if (!response.ok) continue;
-
-          const data = await response.json();
-          label = data?.results?.[0] || null;
-          if (label) break;
-        } catch {
-          continue;
-        }
-      }
-
-      const warningLines = (label?.warnings_and_cautions || [])
-        .map((item: string) => clean(item))
-        .filter(Boolean)
-        .slice(0, 2);
-      const contraindicationLines = (label?.contraindications || [])
-        .map((item: string) => clean(item))
-        .filter(Boolean)
-        .slice(0, 2);
+      const label = await fetchDailyMedLabelPayload(medName);
+      const warningLines = getDailyMedSectionLines(label, ['warnings_and_cautions', 'warningsandcautions', 'warnings', 'boxed_warning', 'boxedwarning'], 2);
+      const contraindicationLines = getDailyMedSectionLines(label, ['contraindications'], 2);
+      const faersSignals = await fetchFaersReactionSignals(medName);
 
       return {
         medName,
         warningLines,
         contraindicationLines,
+        faersSignals,
       };
     }),
   );
@@ -1100,10 +1280,17 @@ export const getDrugAllergyProfileInsight = async (
     ])
     .slice(0, 16);
 
+  const faersEvidenceLines = fdaGroundingByMedicine
+    .flatMap(entry =>
+      entry.faersSignals.map(signal => `${entry.medName} | FAERS reaction: ${signal.reaction} (${signal.count} reports)`),
+    )
+    .slice(0, 18);
+
   const prompt = [
     'You are a medication safety explainer focused on allergy and comorbidity-aware checks.',
-    'Use only FDA label evidence lines for warnings_and_cautions and contraindications as medical grounding.',
+    'Use only FDA evidence lines as medical grounding: DailyMed label sections and FAERS adverse-event reaction counts.',
     'Do not invent adverse effects or contraindications not present in FDA lines.',
+    'Interpret FAERS as reporting signal frequency, not proven causality.',
     'If FDA evidence is unavailable for a medicine, clearly state evidence limitation instead of speculating.',
     `Write summary, findings[].title, findings[].detail, findings[].evidence, and recommendations in ${outputLanguage}.`,
     'Keep medication names and medical terminology in English.',
@@ -1115,7 +1302,8 @@ export const getDrugAllergyProfileInsight = async (
     `Chronic diseases: ${normalizedChronic.join(', ') || 'None'}`,
     `Infection history: ${normalizedInfections.join(', ') || 'None'}`,
     `Allergies: ${normalizedAllergies.map(item => `${item.category}${item.trigger ? `(${item.trigger})` : ''}`).join(', ') || 'None'}`,
-    `FDA label evidence lines: ${fdaEvidenceLines.length > 0 ? fdaEvidenceLines.join(' | ') : 'No FDA warnings_and_cautions/contraindications evidence available for these medicines.'}`,
+    `DailyMed label evidence lines: ${fdaEvidenceLines.length > 0 ? fdaEvidenceLines.join(' | ') : 'No DailyMed warnings_and_cautions/contraindications evidence available for these medicines.'}`,
+    `FDA FAERS evidence lines: ${faersEvidenceLines.length > 0 ? faersEvidenceLines.join(' | ') : 'No FAERS reaction count evidence available for these medicines.'}`,
   ].join('\n');
 
   try {
@@ -1197,6 +1385,7 @@ export const getFoodNutritionProfileInsight = async (
   const chronicDiseases = (input.chronicDiseases || []).map(item => clean(item)).filter(Boolean);
   const infectionHistory = (input.infectionHistory || []).map(item => clean(item)).filter(Boolean);
   const allergies = (input.allergies || []).map(item => clean(item)).filter(Boolean);
+  const medicineUses = (input.medicineUses || []).map(item => clean(item)).filter(Boolean);
 
   const confidenceFromValue = (value: unknown): 'high' | 'medium' | 'low' => {
     const normalized = clean(String(value || '')).toLowerCase();
@@ -1229,7 +1418,7 @@ export const getFoodNutritionProfileInsight = async (
     'Task: provide practical food-type recommendations based on current medicines and disease profile.',
     'Focus on food categories and nutrition strategy (for example: complex carbohydrates, fiber, vitamin E-rich foods, potassium-rich foods, protein quality, hydration).',
     'Avoid fabricated contraindications. If uncertain, state uncertainty conservatively.',
-    'Only claim direct medicine-food interaction if supported by OpenFDA evidence lines.',
+    'Only claim direct medicine-food interaction if supported by DailyMed evidence lines.',
     'If evidence for direct interaction is weak, provide general disease-supportive nutrition advice and set confidence to low or medium.',
     'Do not prescribe drug dose changes. Keep medication names in English.',
     `Write summary, reasons, and timing tips in ${outputLanguage}.`,
@@ -1240,7 +1429,8 @@ export const getFoodNutritionProfileInsight = async (
     `Chronic diseases: ${chronicDiseases.join(', ') || 'None specified'}`,
     `Infection history: ${infectionHistory.join(', ') || 'None specified'}`,
     `Allergies: ${allergies.join(', ') || 'None specified'}`,
-    `OpenFDA evidence lines: ${evidenceLines.length > 0 ? evidenceLines.join(' | ') : 'None available'}`,
+    `Known medicine uses from local medicine dataset: ${medicineUses.join(', ') || 'None available'}`,
+    `DailyMed evidence lines: ${evidenceLines.length > 0 ? evidenceLines.join(' | ') : 'None available'}`,
   ].join('\n');
 
   try {

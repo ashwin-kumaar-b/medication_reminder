@@ -18,6 +18,7 @@ import {
 import { useMedicines } from '@/contexts/MedicineContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { resolveIndianBrandToGeneric } from '@/lib/localMedicineData';
 import { searchRxNavSuggestions } from '@/lib/medicationApis';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -138,6 +139,7 @@ const AddMedicine = () => {
   const [loading, setLoading] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ name: string; rxcui: string; type?: 'brand' | 'generic' }>>([]);
+  const [resolvedGenericPreview, setResolvedGenericPreview] = useState('');
   const [conditionInput, setConditionInput] = useState('');
   const [conditions, setConditions] = useState<string[]>([]);
   const [selectedDays, setSelectedDays] = useState<string[]>(dayOptions.map(day => day.key));
@@ -187,16 +189,25 @@ const AddMedicine = () => {
     const query = form.name.trim();
     if (query.length < 2) {
       setSuggestions([]);
+      setResolvedGenericPreview('');
       return;
     }
 
     const timer = window.setTimeout(async () => {
       try {
         setSuggesting(true);
-        const found = await searchRxNavSuggestions(query);
+        const resolved = await resolveIndianBrandToGeneric(query, { enableFuzzy: false });
+        const effectiveQuery = resolved.genericName || query;
+        const found = await searchRxNavSuggestions(effectiveQuery);
         setSuggestions(found);
+        setResolvedGenericPreview(
+          resolved.matchType !== 'passthrough' && resolved.genericName.toLowerCase() !== query.toLowerCase()
+            ? resolved.genericName
+            : '',
+        );
       } catch {
         setSuggestions([]);
+        setResolvedGenericPreview('');
       } finally {
         setSuggesting(false);
       }
@@ -387,13 +398,19 @@ const AddMedicine = () => {
       return;
     }
 
+    const displayName = form.name.trim();
+    const resolved = await resolveIndianBrandToGeneric(displayName, { enableFuzzy: true });
+    const genericName = resolved.genericName || displayName;
+
     setLoading(true);
 
     const frequency = deriveFrequency();
     const addPromises = selectedSlotDetails.map(slot =>
       addMedication({
         patientId: formPatientId,
-        drugName: form.name.trim(),
+        drugName: genericName,
+        displayName,
+        genericName,
         dosage,
         photoUrl: form.photoUrl || undefined,
         foodTiming: form.foodTiming,
@@ -409,6 +426,13 @@ const AddMedicine = () => {
       toast({ title: 'Unable to add medicine', description: 'Please check your access scope and try again.', variant: 'destructive' });
       setLoading(false);
       return;
+    }
+
+    if (resolved.matchType !== 'passthrough' && resolved.matchedBrand) {
+      toast({
+        title: 'Brand resolved',
+        description: `${resolved.matchedBrand} mapped to generic: ${genericName}`,
+      });
     }
 
     const nextDose = getNextDoseTimeLabel();
@@ -503,6 +527,7 @@ const AddMedicine = () => {
                     />
                     {suggesting && <span className="absolute right-3 top-3 text-xs text-muted-foreground">Searching...</span>}
                   </div>
+                  {resolvedGenericPreview && <p className="mt-1 text-xs text-primary">Resolved generic: {resolvedGenericPreview}</p>}
                   {nameError && <p className="mt-1 text-xs font-semibold text-red-600">{nameError}</p>}
 
                   {suggestions.length > 0 && (
