@@ -241,12 +241,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return {
       id: row.id,
-      patientId: typeof profile.patientId === 'string' ? profile.patientId : undefined,
+      patientId:
+        (typeof row.patient_id === 'string' ? row.patient_id : undefined) ||
+        (typeof profile.patientId === 'string' ? profile.patientId : undefined),
       caretakerId: typeof profile.caretakerId === 'string' ? profile.caretakerId : undefined,
       name: row.name,
       email: row.email,
       phoneNumber:
         (typeof profile.phoneNumber === 'string' ? normalizePhoneNumber(profile.phoneNumber) : undefined) ||
+        (typeof row.phone_number === 'string' ? normalizePhoneNumber(row.phone_number) : undefined) ||
         (typeof row.phone === 'string' ? normalizePhoneNumber(row.phone) : undefined) ||
         extractPhoneNumberFromAuthEmail(row.email),
       password: row.password || undefined,
@@ -292,12 +295,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const buildUserRowPayload = (entry: User, passwordFallback?: string) => ({
     id: entry.id,
+    patient_id: entry.patientId ?? null,
     name: entry.name,
     email: entry.email,
     // Backward-compatible with current schema where password is required.
     password: passwordFallback ?? entry.password ?? '__supabase_auth__',
     role: entry.role,
-    phone: entry.phoneNumber ?? null,
+    phone_number: entry.phoneNumber ?? null,
     ui_mode: entry.uiMode,
     linked_patient_id: entry.linkedPatientId ?? null,
   });

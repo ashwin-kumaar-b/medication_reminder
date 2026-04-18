@@ -366,6 +366,15 @@ const Auth = () => {
           nextErrors.emergencyContactEmail = 'Please enter an emergency contact phone number or email to continue.';
         } else if (!isValidContactValue(emergencyContactEmail)) {
           nextErrors.emergencyContactEmail = 'Please enter a valid phone number or email address.';
+        } else {
+          const normalizedOwnPhone = normalizePhoneNumber(phoneNumber);
+          const emergencyValue = emergencyContactEmail.trim();
+          if (isValidPhoneNumber(emergencyValue)) {
+            const normalizedEmergencyPhone = normalizePhoneNumber(emergencyValue);
+            if (normalizedEmergencyPhone === normalizedOwnPhone) {
+              nextErrors.emergencyContactEmail = 'Emergency contact number cannot be the same as your mobile number.';
+            }
+          }
         }
 
         setStepTwoErrors(nextErrors);
