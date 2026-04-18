@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMedicines } from '@/contexts/MedicineContext';
 import { useToast } from '@/hooks/use-toast';
 import { Pill, Trash2, Clock, Plus, Pencil } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { getMedicineDetailsByName } from '@/lib/localMedicineData';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const Medicines = () => {
@@ -14,6 +15,7 @@ const Medicines = () => {
   const linkedPatients = useMemo(() => getLinkedPatients(user?.id), [getLinkedPatients, user?.id]);
   const defaultPatientId = user?.role === 'patient' ? user.id : (searchParams.get('patientId') || (linkedPatients.length > 0 ? linkedPatients[0].id : ''));
   const [selectedPatientId, setSelectedPatientId] = useState<string>(defaultPatientId);
+  const [substituteById, setSubstituteById] = useState<Record<string, string[]>>({});
 
   const displayedMedicines = useMemo(() => {
     if (user?.role === 'patient') return medicines;
@@ -25,6 +27,31 @@ const Medicines = () => {
         return med && med.patientId === selectedPatientId;
     });
   }, [medicines, medications, user?.role, selectedPatientId]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadSubstitutes = async () => {
+      const pairs = await Promise.all(
+        displayedMedicines.map(async legacyMed => {
+          const sourceMedication = medications.find(item => item.id === legacyMed.id);
+          const lookupName = sourceMedication?.genericName || sourceMedication?.drugName || legacyMed.name;
+          const details = await getMedicineDetailsByName(lookupName);
+          return [legacyMed.id, details?.substitutes?.slice(0, 3) || []] as const;
+        }),
+      );
+
+      if (!active) return;
+
+      setSubstituteById(Object.fromEntries(pairs));
+    };
+
+    void loadSubstitutes();
+
+    return () => {
+      active = false;
+    };
+  }, [displayedMedicines, medications]);
 
   const handleDelete = (id: string, name: string) => {
     removeMedicine(id);
@@ -69,6 +96,13 @@ const Medicines = () => {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {displayedMedicines.map((med, i) => (
             <div key={med.id} className="animate-fade-in rounded-xl border border-border bg-card p-5 shadow-card transition-all hover:shadow-elevated" style={{ animationDelay: `${i * 0.05}s` }}>
+              {(() => {
+                const sourceMedication = medications.find(item => item.id === med.id);
+                const genericName = sourceMedication?.genericName || sourceMedication?.drugName;
+                const substitutes = substituteById[med.id] || [];
+
+                return (
+                  <>
               <div className="mb-3 flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   {med.photoUrl ? (
@@ -85,6 +119,9 @@ const Medicines = () => {
                   <div>
                     <h3 className="font-semibold text-foreground">{med.name}</h3>
                     <p className="text-sm text-muted-foreground">{med.dosage}</p>
+                    {genericName && genericName.toLowerCase() !== med.name.toLowerCase() && (
+                      <p className="text-xs text-muted-foreground">Generic: {genericName}</p>
+                    )}
                   </div>
                 </div>
                 <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${med.isActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}>
@@ -94,6 +131,7 @@ const Medicines = () => {
               <div className="mb-3 space-y-1 text-sm text-muted-foreground">
                 <div className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> {med.frequency} — {med.timeSlots.join(', ')}</div>
                 {med.foodInstructions && <p className="italic">📋 {med.foodInstructions}</p>}
+                {substitutes.length > 0 && <p className="text-xs">Similar medicines: {substitutes.join(', ')}</p>}
               </div>
               <div className="flex justify-end gap-2">
                 <Link to={`/edit-medicine/${med.id}`} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-foreground hover:bg-muted">
@@ -103,6 +141,9 @@ const Medicines = () => {
                   <Trash2 className="h-3.5 w-3.5" /> Remove
                 </button>
               </div>
+                  </>
+                );
+              })()}
             </div>
           ))}
         </div>

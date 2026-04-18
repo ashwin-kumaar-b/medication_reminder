@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Loader2, Pill, Save } from 'lucide-react';
 import { useMedicines } from '@/contexts/MedicineContext';
 import { useToast } from '@/hooks/use-toast';
+import { resolveIndianBrandToGeneric } from '@/lib/localMedicineData';
 import { searchRxNavSuggestions } from '@/lib/medicationApis';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -87,7 +88,7 @@ const EditMedicine = () => {
 
     const dosage = parseDosage(medication.dosage);
     setForm({
-      name: medication.drugName,
+      name: medication.displayName || medication.drugName,
       dosageAmount: dosage.amount,
       dosageUnit: dosage.unit,
       photoUrl: medication.photoUrl || '',
@@ -161,9 +162,15 @@ const EditMedicine = () => {
       return;
     }
 
+    const displayName = form.name.trim();
+    const resolved = await resolveIndianBrandToGeneric(displayName, { enableFuzzy: true });
+    const genericName = resolved.genericName || displayName;
+
     setLoading(true);
     const updated = await updateMedication(medication.id, {
-      drugName: form.name.trim(),
+      drugName: genericName,
+      displayName,
+      genericName,
       dosage,
       photoUrl: form.photoUrl || undefined,
       foodTiming: form.foodTiming,
@@ -179,7 +186,7 @@ const EditMedicine = () => {
       return;
     }
 
-    toast({ title: 'Medicine updated', description: `${updated.drugName} was saved successfully.` });
+    toast({ title: 'Medicine updated', description: `${updated.displayName || updated.drugName} was saved successfully.` });
     setLoading(false);
     navigate('/medicines');
   };

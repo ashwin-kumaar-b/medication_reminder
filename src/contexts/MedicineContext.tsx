@@ -18,6 +18,10 @@ export interface Medication {
   id: string;
   patientId: string;
   drugName: string;
+  displayName?: string;
+  genericName?: string;
+  whoEssential?: boolean;
+  whoRiskTier?: 'medium' | 'high';
   dosage: string;
   photoUrl?: string;
   foodTiming: 'before-food' | 'after-food';
@@ -189,6 +193,10 @@ const mapMedicationRow = (row: any): Medication => ({
   id: row.id,
   patientId: row.patient_id,
   drugName: row.drug_name,
+  displayName: row.display_name || undefined,
+  genericName: row.generic_name || undefined,
+  whoEssential: typeof row.who_essential === 'boolean' ? row.who_essential : undefined,
+  whoRiskTier: row.who_risk_tier === 'high' || row.who_risk_tier === 'medium' ? row.who_risk_tier : undefined,
   dosage: row.dosage,
   photoUrl: row.photo_url || undefined,
   foodTiming: row.food_timing || 'before-food',
@@ -568,6 +576,10 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
         .insert({
           patient_id: med.patientId,
           drug_name: med.drugName,
+          display_name: med.displayName ?? null,
+          generic_name: med.genericName ?? null,
+          who_essential: med.whoEssential ?? null,
+          who_risk_tier: med.whoRiskTier ?? null,
           dosage: med.dosage,
           photo_url: med.photoUrl ?? null,
             food_timing: med.foodTiming === 'after-food' ? 'after-food' : 'before-food',
@@ -605,7 +617,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
 
   const updateMedication = async (
     id: string,
-    updates: Partial<Pick<Medication, 'drugName' | 'dosage' | 'photoUrl' | 'foodTiming' | 'category' | 'criticality' | 'scheduleTime' | 'frequency'>>,
+    updates: Partial<Pick<Medication, 'drugName' | 'displayName' | 'genericName' | 'whoEssential' | 'whoRiskTier' | 'dosage' | 'photoUrl' | 'foodTiming' | 'category' | 'criticality' | 'scheduleTime' | 'frequency'>>,
   ) => {
     const existing = medications.find(entry => entry.id === id);
     if (!existing || !isPatientVisible(existing.patientId)) return null;
@@ -630,6 +642,10 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
         .from('medications')
         .update({
           drug_name: next.drugName,
+          display_name: next.displayName ?? null,
+          generic_name: next.genericName ?? null,
+          who_essential: next.whoEssential ?? null,
+          who_risk_tier: next.whoRiskTier ?? null,
           dosage: next.dosage,
           photo_url: next.photoUrl ?? null,
           food_timing: next.foodTiming,
@@ -853,7 +869,7 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
   const medicines = useMemo<LegacyMedicine[]>(() => {
     return scopedMedications.map(med => ({
       id: med.id,
-      name: med.drugName,
+      name: med.displayName || med.drugName,
       dosage: med.dosage,
       photoUrl: med.photoUrl,
       frequency: med.frequency === 'weekly' ? 'daily' : med.frequency,
