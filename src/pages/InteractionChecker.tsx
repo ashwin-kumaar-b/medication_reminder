@@ -210,6 +210,8 @@ const InteractionChecker = () => {
     const insight = await getDrugAllergyProfileInsight({
       language: settings.language,
       medicines: activeMedicineNames,
+      gender: user?.gender ? `${user.gender}${user?.genderOther ? ` (${user.genderOther})` : ''}` : undefined,
+      bloodGroup: user?.bloodGroup,
       chronicDiseases: user?.chronicDiseases,
       infectionHistory: user?.infectionHistory,
       allergies: user?.allergies,
@@ -301,6 +303,7 @@ const InteractionChecker = () => {
                 ))}
               </ul>
             )}
+            <p className="mt-2 text-xs text-muted-foreground">Based on FDA drug label data.</p>
             <p className="mt-2 text-xs text-muted-foreground">Source: {profileInsight.source}</p>
           </div>
         )}

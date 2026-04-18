@@ -716,6 +716,7 @@ const Dashboard = () => {
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-bold text-destructive">
                 {missedDoseInsight.riskProgression}
               </p>
+              <p className="mt-2 text-xs font-medium text-muted-foreground">Severity based on FDA boxed warning classification.</p>
               <p className="mt-2 text-xs font-medium text-muted-foreground">{t('common.source')}: {missedDoseInsight.source}</p>
             </>
           ) : (
