@@ -247,6 +247,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       email: row.email,
       phoneNumber:
         (typeof profile.phoneNumber === 'string' ? normalizePhoneNumber(profile.phoneNumber) : undefined) ||
+        (typeof row.phone === 'string' ? normalizePhoneNumber(row.phone) : undefined) ||
         extractPhoneNumberFromAuthEmail(row.email),
       password: row.password || undefined,
       role: row.role,
