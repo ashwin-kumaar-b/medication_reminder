@@ -153,6 +153,9 @@ const MissedDoses = () => {
                                   ))}
                                 </ul>
                               )}
+                              <p className="text-[11px] text-muted-foreground">
+                                This advice is based on your dosing schedule and FDA label guidance. Consult your pharmacist for personalized advice.
+                              </p>
                               <p className="text-[11px] text-muted-foreground">Source: {advice.source}</p>
                             </div>
                           )}

@@ -72,7 +72,7 @@ export interface MissedDoseSeverityInsight {
   guidance: string;
   riskProgression: string;
   missesUntilWorse: number | null;
-  source: 'Groq';
+  source: 'OpenFDA' | 'OpenFDA + Groq';
 }
 
 export interface MissedDoseRecoveryInput {
@@ -99,12 +99,14 @@ export interface MissedDoseRecoveryAdvice {
   foodTimingInstruction: string;
   monitoringNotes: string[];
   confidence: 'high' | 'medium' | 'low';
-  source: 'Groq';
+  source: 'OpenFDA' | 'OpenFDA + Groq' | 'Schedule Rule' | 'Schedule Rule + Groq';
 }
 
 export interface DrugAllergyProfileInput {
   language?: 'en' | 'es' | 'fr' | 'ta' | 'te' | 'hi';
   medicines: string[];
+  gender?: string;
+  bloodGroup?: string;
   chronicDiseases?: string[];
   infectionHistory?: string[];
   allergies?: Array<{ category: string; trigger?: string }>;
@@ -630,7 +632,7 @@ export const getGeminiMedicalAdvice = async (input: GeminiMedicalInput): Promise
 export const getMissedDoseSeverityInsight = async (
   input: MissedDoseSeverityInput,
 ): Promise<MissedDoseSeverityInsight | null> => {
-  if (!GROQ_API_KEY || !input.missed.length) return null;
+  if (!input.missed.length || !OPENFDA_API_KEY) return null;
 
   const languageNameByCode: Record<NonNullable<MissedDoseSeverityInput['language']>, string> = {
     en: 'English',
@@ -643,125 +645,110 @@ export const getMissedDoseSeverityInsight = async (
   const languageCode = input.language || 'en';
   const outputLanguage = languageNameByCode[languageCode] || 'English';
 
-  const prompt = [
-    'You are a medication adherence risk triage assistant.',
-    'Assess missed-dose severity for a patient using the provided missed medication list.',
-    'Provide practical and direct wording for a patient dashboard.',
-    'Summary must explicitly mention at least one exact missed drug name from the Missed meds list.',
-    'Do NOT mention any medicine name that is not present in Missed meds list.',
-    'If a medicine name is not in Missed meds list, never generate it.',
-    'Guidance must explain the likely near-term health effects of missing this specific dose.',
-    'Guidance should describe effects (for example symptom worsening, reduced control, rebound risk), not only generic advice.',
-    'Do not use guidance to tell the user to take the missed dose now or resume schedule.',
-    'If symptoms are uncertain, state uncertainty and describe the most likely effect conservatively.',
-    'You MUST include a progression statement with an estimate of how many additional misses could worsen condition control.',
-    'If uncertain, give a conservative estimate and mention uncertainty in guidance.',
-    `Write summary, guidance, and riskProgression in ${outputLanguage}.`,
-    'Keep medicine names and medical terms in English (drug names, dosage units, diagnosis terms).',
-    'Do not translate medication names listed in Missed meds.',
-    'Return strict JSON only with this exact shape:',
-    '{"severity":"high|moderate|low","summary":"...","guidance":"...","riskProgression":"...","missesUntilWorse":number|null}',
-    `Output language: ${outputLanguage}`,
-    `Patient age: ${input.patientAge ?? 'unknown'}`,
-    `Primary condition: ${input.condition || 'not specified'}`,
-    `Missed meds: ${input.missed
-      .map(item => `${item.drugName} [category=${item.category}, criticality=${item.criticality}, missedCount=${item.missedCount}, lastMissed=${item.lastMissedDate}]`)
-      .join(' | ')}`,
-  ].join('\n');
+  const uniqueMedicines = Array.from(new Set(input.missed.map(item => clean(item.drugName)).filter(Boolean))).slice(0, 6);
 
-  try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        temperature: 0.2,
-        max_tokens: 320,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: 'You are a careful medication adherence risk assistant. Return strict JSON only.' },
-          { role: 'user', content: prompt },
-        ],
-      }),
-    });
+  const fdaByMedicine = await Promise.all(
+    uniqueMedicines.map(async medName => {
+      const terms = getOpenFdaSearchTerms(medName);
+      let label: any = null;
 
-    if (!response.ok) return null;
-    const payload = await response.json();
-    const rawText = extractGroqText(payload);
-    const parsed = parseGeminiJson(rawText);
-    if (!parsed) return null;
+      for (const term of terms) {
+        const escaped = term.replace(/"/g, '');
+        const query = [
+          `openfda.brand_name:"${escaped}"`,
+          `openfda.generic_name:"${escaped}"`,
+          `openfda.substance_name:"${escaped}"`,
+        ].join('+OR+');
 
-    const rawMissesUntilWorse =
-      typeof parsed.missesUntilWorse === 'number'
-        ? parsed.missesUntilWorse
-        : typeof parsed.missesUntilWorse === 'string'
-        ? Number(parsed.missesUntilWorse)
-        : null;
+        try {
+          const response = await fetch(
+            `https://api.fda.gov/drug/label.json?api_key=${encodeURIComponent(OPENFDA_API_KEY)}&search=${encodeURIComponent(query)}&limit=1`,
+          );
+          if (!response.ok) continue;
 
+          const data = await response.json();
+          label = data?.results?.[0] || null;
+          if (label) break;
+        } catch {
+          continue;
+        }
+      }
+
+      const boxedWarnings = (label?.boxed_warning || [])
+        .map((item: string) => clean(item))
+        .filter(Boolean)
+        .slice(0, 2);
+      const warnings = (label?.warnings || [])
+        .map((item: string) => clean(item))
+        .filter(Boolean)
+        .slice(0, 2);
+
+      return {
+        medName,
+        boxedWarnings,
+        warnings,
+      };
+    }),
+  );
+
+  const hasBoxedWarning = fdaByMedicine.some(entry => entry.boxedWarnings.length > 0);
+  const hasWarningsOnly = fdaByMedicine.some(entry => entry.boxedWarnings.length === 0 && entry.warnings.length > 0);
+
+  const severity: MissedDoseSeverityInsight['severity'] = hasBoxedWarning ? 'high' : hasWarningsOnly ? 'moderate' : 'low';
+
+  const fdaEvidenceLines = fdaByMedicine
+    .flatMap(entry => [
+      ...entry.boxedWarnings.map(line => `${entry.medName} | boxed_warning: ${line}`),
+      ...entry.warnings.map(line => `${entry.medName} | warnings: ${line}`),
+    ])
+    .slice(0, 12);
+
+  const medsWithBoxed = fdaByMedicine.filter(entry => entry.boxedWarnings.length > 0).map(entry => entry.medName);
+  const medsWithWarnings = fdaByMedicine
+    .filter(entry => entry.boxedWarnings.length === 0 && entry.warnings.length > 0)
+    .map(entry => entry.medName);
+
+  const summary =
+    severity === 'high'
+      ? `High severity based on FDA boxed warnings for: ${medsWithBoxed.join(', ')}.`
+      : severity === 'moderate'
+      ? `Moderate severity based on FDA warnings for: ${medsWithWarnings.join(', ')}.`
+      : 'Low severity because FDA boxed warning and warning text were not found for the missed medicines queried.';
+
+  const riskProgression =
+    severity === 'high'
+      ? 'FDA boxed warning present: further missed doses can quickly raise risk. Seek clinician guidance promptly.'
+      : severity === 'moderate'
+      ? 'FDA warnings are present: repeated missed doses may worsen condition control in the near term.'
+      : 'No FDA boxed warning/warning text detected for queried labels; continue strict adherence and monitor symptoms.';
+
+  const missesUntilWorse = severity === 'high' ? 1 : severity === 'moderate' ? 2 : 3;
+
+  const defaultGuidance =
+    fdaEvidenceLines[0] ||
+    'No FDA warning text was found for these medicine label queries. Continue prescribed adherence and consult your clinician if symptoms worsen.';
+
+  if (!GROQ_API_KEY) {
     return {
-      severity: normalizeSeverity(parsed.severity),
-      summary: clean(parsed.summary) || 'Missed doses may increase your near-term health risk.',
-      guidance:
-        clean(parsed.guidance) ||
-        'Missing this dose may reduce short-term control of your condition and increase risk of symptom worsening.',
-      riskProgression: clean(parsed.riskProgression) || 'Further missed doses may worsen control of your condition.',
-      missesUntilWorse:
-        typeof rawMissesUntilWorse === 'number' && Number.isFinite(rawMissesUntilWorse) && rawMissesUntilWorse >= 0
-          ? Math.round(rawMissesUntilWorse)
-          : null,
-      source: 'Groq',
+      severity,
+      summary,
+      guidance: defaultGuidance,
+      riskProgression,
+      missesUntilWorse,
+      source: 'OpenFDA',
     };
-  } catch {
-    return null;
   }
-};
-
-export const getMissedDoseRecoveryAdvice = async (
-  input: MissedDoseRecoveryInput,
-): Promise<MissedDoseRecoveryAdvice | null> => {
-  if (!GROQ_API_KEY) return null;
-
-  const languageNameByCode: Record<NonNullable<MissedDoseRecoveryInput['language']>, string> = {
-    en: 'English',
-    es: 'Spanish',
-    fr: 'French',
-    ta: 'Tamil',
-    te: 'Telugu',
-    hi: 'Hindi',
-  };
-  const outputLanguage = languageNameByCode[input.language || 'en'] || 'English';
-  const nowIso = input.nowIso || new Date().toISOString();
 
   const prompt = [
-    'You are a technical medication adherence decision assistant.',
-    'Task: advise what to do for a missed dose using conservative clinical safety logic.',
-    'You must decide one action only from this set:',
-    '- take-full-dose-now',
-    '- take-half-dose-now',
-    '- skip-and-resume-next',
-    '- contact-clinician-now',
-    'Rules:',
-    '- Never suggest doubling next dose.',
-    '- If uncertainty is high or medicine is high-criticality, prefer contact-clinician-now or skip-and-resume-next.',
-    '- Use timing from missedScheduledAt vs nowIso and foodTiming in reasoning.',
-    '- Keep drug names and medical terminology in English.',
-    `Write technicalRationale, foodTimingInstruction, and monitoringNotes in ${outputLanguage}.`,
-    'Return strict JSON only with this exact shape:',
-    '{"action":"take-full-dose-now|take-half-dose-now|skip-and-resume-next|contact-clinician-now","urgency":"high|moderate|low","technicalRationale":"...","foodTimingInstruction":"...","monitoringNotes":["..."],"confidence":"high|medium|low"}',
-    `nowIso: ${nowIso}`,
-    `drugName: ${input.medication.drugName}`,
-    `dosage: ${input.medication.dosage}`,
-    `category: ${input.medication.category}`,
-    `criticality: ${input.medication.criticality}`,
-    `frequency: ${input.medication.frequency}`,
-    `foodTiming: ${input.medication.foodTiming}`,
-    `scheduledTime: ${input.medication.scheduledTime}`,
-    `missedScheduledAt: ${input.medication.missedScheduledAt}`,
-    `missedCountForMedication: ${input.medication.missedCountForMedication}`,
-    `missedCountRecentWindow: ${input.medication.missedCountRecentWindow}`,
+    'You are a medical text simplifier for a patient dashboard.',
+    'Do NOT determine severity. Severity has already been determined from FDA classification.',
+    'Using only the FDA label evidence below, produce one plain-language sentence about concern when doses are missed.',
+    'Do not invent facts that are not present in the FDA evidence.',
+    `Write the sentence in ${outputLanguage}.`,
+    'Keep medication names in English.',
+    'Return strict JSON only with this exact shape: {"sentence":"..."}',
+    `Missed medicines: ${uniqueMedicines.join(', ')}`,
+    `FDA evidence: ${fdaEvidenceLines.length > 0 ? fdaEvidenceLines.join(' | ') : 'No FDA warning evidence found.'}`,
   ].join('\n');
 
   try {
@@ -774,56 +761,261 @@ export const getMissedDoseRecoveryAdvice = async (
       body: JSON.stringify({
         model: 'llama-3.1-8b-instant',
         temperature: 0.1,
-        max_tokens: 380,
+        max_tokens: 140,
         response_format: { type: 'json_object' },
         messages: [
-          { role: 'system', content: 'You are a conservative medication dosing safety assistant. Return strict JSON only.' },
+          { role: 'system', content: 'You simplify FDA label text into one patient-friendly sentence. Return strict JSON only.' },
           { role: 'user', content: prompt },
         ],
       }),
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      return {
+        severity,
+        summary,
+        guidance: defaultGuidance,
+        riskProgression,
+        missesUntilWorse,
+        source: 'OpenFDA',
+      };
+    }
     const payload = await response.json();
     const rawText = extractGroqText(payload);
     const parsed = parseGeminiJson(rawText);
-    if (!parsed) return null;
+    const simplifiedSentence = clean(parsed?.sentence);
 
-    const action =
-      parsed.action === 'take-full-dose-now' ||
-      parsed.action === 'take-half-dose-now' ||
-      parsed.action === 'skip-and-resume-next' ||
-      parsed.action === 'contact-clinician-now'
-        ? parsed.action
-        : 'contact-clinician-now';
+    return {
+      severity,
+      summary,
+      guidance: simplifiedSentence || defaultGuidance,
+      riskProgression,
+      missesUntilWorse,
+      source: 'OpenFDA + Groq',
+    };
+  } catch {
+    return {
+      severity,
+      summary,
+      guidance: defaultGuidance,
+      riskProgression,
+      missesUntilWorse,
+      source: 'OpenFDA',
+    };
+  }
+};
 
-    const urgency =
-      parsed.urgency === 'high' || parsed.urgency === 'moderate' || parsed.urgency === 'low'
-        ? parsed.urgency
-        : 'moderate';
+export const getMissedDoseRecoveryAdvice = async (
+  input: MissedDoseRecoveryInput,
+): Promise<MissedDoseRecoveryAdvice | null> => {
+  const languageNameByCode: Record<NonNullable<MissedDoseRecoveryInput['language']>, string> = {
+    en: 'English',
+    es: 'Spanish',
+    fr: 'French',
+    ta: 'Tamil',
+    te: 'Telugu',
+    hi: 'Hindi',
+  };
+  const outputLanguage = languageNameByCode[input.language || 'en'] || 'English';
+  const nowIso = input.nowIso || new Date().toISOString();
 
-    const confidence =
-      parsed.confidence === 'high' || parsed.confidence === 'medium' || parsed.confidence === 'low'
-        ? parsed.confidence
-        : 'low';
+  const parseIntervalHoursFromFrequency = (frequency: string) => {
+    const lowered = clean(frequency).toLowerCase();
+    const everyHoursMatch = lowered.match(/every\s*(\d+)\s*(hour|hours|hr|hrs)/);
+    if (everyHoursMatch) {
+      const parsed = Number(everyHoursMatch[1]);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+
+    const perDayMatch = lowered.match(/(\d+)\s*(x|times?)\s*(a|per)?\s*day/);
+    if (perDayMatch) {
+      const times = Number(perDayMatch[1]);
+      if (Number.isFinite(times) && times > 0) return 24 / times;
+    }
+
+    if (lowered.includes('twice') || lowered.includes('bid')) return 12;
+    if (lowered.includes('three') || lowered.includes('thrice') || lowered.includes('tid')) return 8;
+    if (lowered.includes('four') || lowered.includes('qid')) return 6;
+    if (lowered.includes('weekly')) return 24 * 7;
+    if (lowered.includes('daily') || lowered.includes('once') || lowered.includes('qd') || lowered.includes('every day')) return 24;
+
+    return 24;
+  };
+
+  const getFoodTimingInstruction = (
+    action: MissedDoseRecoveryAdvice['action'],
+    foodTiming: MissedDoseRecoveryInput['medication']['foodTiming'],
+  ) => {
+    const actionText =
+      action === 'take-full-dose-now'
+        ? 'If you take it now, '
+        : action === 'skip-and-resume-next'
+        ? 'For your next scheduled dose, '
+        : 'Follow label timing and ';
+
+    if (foodTiming === 'before-food') return `${actionText}take it before food as prescribed.`;
+    if (foodTiming === 'after-food') return `${actionText}take it after food as prescribed.`;
+    return `${actionText}follow the medicine label for food timing.`;
+  };
+
+  const missedAt = new Date(input.medication.missedScheduledAt).getTime();
+  const nowAt = new Date(nowIso).getTime();
+  const elapsedMs = Number.isFinite(missedAt) && Number.isFinite(nowAt) ? Math.max(0, nowAt - missedAt) : 0;
+  const intervalMs = parseIntervalHoursFromFrequency(input.medication.frequency) * 60 * 60 * 1000;
+  const lessThanHalfWindow = elapsedMs < intervalMs / 2;
+
+  let action: MissedDoseRecoveryAdvice['action'] = lessThanHalfWindow ? 'take-full-dose-now' : 'skip-and-resume-next';
+  let urgency: MissedDoseRecoveryAdvice['urgency'] = input.medication.criticality === 'high' ? 'high' : 'moderate';
+  let confidence: MissedDoseRecoveryAdvice['confidence'] = 'medium';
+  let technicalRationale =
+    action === 'take-full-dose-now'
+      ? 'Rule-based schedule guidance: less than half the dosing interval has passed, so taking the missed dose now is generally safer than skipping.'
+      : 'Rule-based schedule guidance: more than half the dosing interval has passed, so skip the missed dose and resume the next scheduled dose.';
+  let source: MissedDoseRecoveryAdvice['source'] = 'Schedule Rule';
+
+  if (OPENFDA_API_KEY) {
+    const terms = getOpenFdaSearchTerms(input.medication.drugName);
+    let label: any = null;
+
+    for (const term of terms) {
+      const escaped = term.replace(/"/g, '');
+      const query = [
+        `openfda.brand_name:"${escaped}"`,
+        `openfda.generic_name:"${escaped}"`,
+        `openfda.substance_name:"${escaped}"`,
+      ].join('+OR+');
+
+      try {
+        const response = await fetch(
+          `https://api.fda.gov/drug/label.json?api_key=${encodeURIComponent(OPENFDA_API_KEY)}&search=${encodeURIComponent(query)}&limit=1`,
+        );
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        label = data?.results?.[0] || null;
+        if (label) break;
+      } catch {
+        continue;
+      }
+    }
+
+    const dosageLines = (label?.dosage_and_administration || [])
+      .map((item: string) => clean(item))
+      .filter(Boolean)
+      .slice(0, 3);
+
+    if (dosageLines.length > 0) {
+      const missedDoseLine = dosageLines.find(line => /missed dose|as soon as|next dose|skip|double/i.test(line)) || dosageLines[0];
+      const normalizedLine = missedDoseLine.toLowerCase();
+
+      if (/(contact|doctor|clinician|provider|pharmacist)/i.test(normalizedLine) && !/(take as soon as|skip)/i.test(normalizedLine)) {
+        action = 'contact-clinician-now';
+        urgency = 'high';
+        confidence = 'high';
+      } else if (/(skip).*(next dose)|(next dose).*(skip)/i.test(normalizedLine)) {
+        action = 'skip-and-resume-next';
+        urgency = 'moderate';
+        confidence = 'high';
+      } else if (/(take as soon as|take it as soon as|as soon as possible|immediately)/i.test(normalizedLine)) {
+        action = 'take-full-dose-now';
+        urgency = input.medication.criticality === 'high' ? 'high' : 'moderate';
+        confidence = 'high';
+      }
+
+      technicalRationale = `FDA dosage and administration guidance: ${missedDoseLine}`;
+      source = 'OpenFDA';
+    }
+  }
+
+  const baseFoodTimingInstruction = getFoodTimingInstruction(action, input.medication.foodTiming);
+  const baseMonitoringNotes = [
+    'Never double the next dose unless your FDA label guidance explicitly says it is safe.',
+    'Seek pharmacist or clinician advice for personalized adjustments.',
+  ];
+
+  if (!GROQ_API_KEY) {
+    return {
+      action,
+      urgency,
+      technicalRationale,
+      foodTimingInstruction: baseFoodTimingInstruction,
+      monitoringNotes: baseMonitoringNotes,
+      confidence,
+      source,
+    };
+  }
+
+  const phrasingPrompt = [
+    'You are a patient-language medical wording assistant.',
+    'Action has already been determined and must not be changed.',
+    'Do not invent medical facts or new dosing rules.',
+    'Use the provided grounding text only, and keep wording short and clear.',
+    `Write output in ${outputLanguage}.`,
+    'Return strict JSON only with this exact shape:',
+    '{"foodTimingInstruction":"...","monitoringNotes":["...","..."]}',
+    `Chosen action: ${action}`,
+    `Grounding text: ${technicalRationale}`,
+    `Base food timing instruction: ${baseFoodTimingInstruction}`,
+    `Base monitoring notes: ${baseMonitoringNotes.join(' | ')}`,
+  ].join('\n');
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.1,
+        max_tokens: 220,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'You rewrite grounded medication guidance for readability. Return strict JSON only.' },
+          { role: 'user', content: phrasingPrompt },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      return {
+        action,
+        urgency,
+        technicalRationale,
+        foodTimingInstruction: baseFoodTimingInstruction,
+        monitoringNotes: baseMonitoringNotes,
+        confidence,
+        source,
+      };
+    }
+    const payload = await response.json();
+    const rawText = extractGroqText(payload);
+    const parsed = parseGeminiJson(rawText);
+    const friendlyFoodTiming = clean(parsed?.foodTimingInstruction) || baseFoodTimingInstruction;
+    const friendlyMonitoring = Array.isArray(parsed?.monitoringNotes)
+      ? parsed.monitoringNotes.map((item: string) => clean(item)).filter(Boolean).slice(0, 4)
+      : baseMonitoringNotes;
 
     return {
       action,
       urgency,
-      technicalRationale:
-        clean(parsed.technicalRationale) ||
-        'Dose-recovery decision requires conservative safety handling based on missed timing and medication profile.',
-      foodTimingInstruction:
-        clean(parsed.foodTimingInstruction) ||
-        'Keep food timing aligned with label instructions and avoid compensating with extra dose.',
-      monitoringNotes: Array.isArray(parsed.monitoringNotes)
-        ? parsed.monitoringNotes.map((item: string) => clean(item)).filter(Boolean).slice(0, 4)
-        : ['Monitor symptoms closely and seek clinical review if uncertain.'],
+      technicalRationale,
+      foodTimingInstruction: friendlyFoodTiming,
+      monitoringNotes: friendlyMonitoring,
       confidence,
-      source: 'Groq',
+      source: source === 'OpenFDA' ? 'OpenFDA + Groq' : 'Schedule Rule + Groq',
     };
   } catch {
-    return null;
+    return {
+      action,
+      urgency,
+      technicalRationale,
+      foodTimingInstruction: baseFoodTimingInstruction,
+      monitoringNotes: baseMonitoringNotes,
+      confidence,
+      source,
+    };
   }
 };
 
@@ -850,19 +1042,80 @@ export const getDrugAllergyProfileInsight = async (
       trigger: clean(item.trigger),
     }))
     .filter(item => item.category);
+  const normalizedGender = clean(input.gender);
+  const normalizedBloodGroup = clean(input.bloodGroup);
+
+  if (!OPENFDA_API_KEY) {
+    return null;
+  }
+
+  const fdaGroundingByMedicine = await Promise.all(
+    input.medicines.slice(0, 6).map(async medName => {
+      const terms = getOpenFdaSearchTerms(medName);
+      let label: any = null;
+
+      for (const term of terms) {
+        const escaped = term.replace(/"/g, '');
+        const query = [
+          `openfda.brand_name:"${escaped}"`,
+          `openfda.generic_name:"${escaped}"`,
+          `openfda.substance_name:"${escaped}"`,
+        ].join('+OR+');
+
+        try {
+          const response = await fetch(
+            `https://api.fda.gov/drug/label.json?api_key=${encodeURIComponent(OPENFDA_API_KEY)}&search=${encodeURIComponent(query)}&limit=1`,
+          );
+          if (!response.ok) continue;
+
+          const data = await response.json();
+          label = data?.results?.[0] || null;
+          if (label) break;
+        } catch {
+          continue;
+        }
+      }
+
+      const warningLines = (label?.warnings_and_cautions || [])
+        .map((item: string) => clean(item))
+        .filter(Boolean)
+        .slice(0, 2);
+      const contraindicationLines = (label?.contraindications || [])
+        .map((item: string) => clean(item))
+        .filter(Boolean)
+        .slice(0, 2);
+
+      return {
+        medName,
+        warningLines,
+        contraindicationLines,
+      };
+    }),
+  );
+
+  const fdaEvidenceLines = fdaGroundingByMedicine
+    .flatMap(entry => [
+      ...entry.warningLines.map(line => `${entry.medName} | warnings_and_cautions: ${line}`),
+      ...entry.contraindicationLines.map(line => `${entry.medName} | contraindications: ${line}`),
+    ])
+    .slice(0, 16);
 
   const prompt = [
-    'You are a medication safety assistant focused on allergy and comorbidity-aware checks.',
-    'Analyze the patient profile for potential drug-allergy and disease/infection related medication risks.',
-    'Strictly avoid fabricated claims; if uncertain, state limited evidence clearly.',
+    'You are a medication safety explainer focused on allergy and comorbidity-aware checks.',
+    'Use only FDA label evidence lines for warnings_and_cautions and contraindications as medical grounding.',
+    'Do not invent adverse effects or contraindications not present in FDA lines.',
+    'If FDA evidence is unavailable for a medicine, clearly state evidence limitation instead of speculating.',
     `Write summary, findings[].title, findings[].detail, findings[].evidence, and recommendations in ${outputLanguage}.`,
     'Keep medication names and medical terminology in English.',
+    'Explain in simple patient language while staying faithful to FDA evidence text.',
     'Return strict JSON only with this exact shape:',
     '{"overallRisk":"high|moderate|low|none","summary":"...","findings":[{"severity":"high|moderate|low","title":"...","detail":"...","evidence":"..."}],"recommendations":["..."]}',
     `Current medicines: ${input.medicines.join(', ')}`,
+    `Patient profile: gender=${normalizedGender || 'Not specified'}, blood_group=${normalizedBloodGroup || 'Not specified'}`,
     `Chronic diseases: ${normalizedChronic.join(', ') || 'None'}`,
     `Infection history: ${normalizedInfections.join(', ') || 'None'}`,
     `Allergies: ${normalizedAllergies.map(item => `${item.category}${item.trigger ? `(${item.trigger})` : ''}`).join(', ') || 'None'}`,
+    `FDA label evidence lines: ${fdaEvidenceLines.length > 0 ? fdaEvidenceLines.join(' | ') : 'No FDA warnings_and_cautions/contraindications evidence available for these medicines.'}`,
   ].join('\n');
 
   try {
