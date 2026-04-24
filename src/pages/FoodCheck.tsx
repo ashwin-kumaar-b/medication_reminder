@@ -15,6 +15,8 @@ import {
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { getMedicineDetailsByName } from '@/lib/localMedicineData';
+import { parseMedicineName } from '@/utils/medicineUtils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const FoodCheck = () => {
   const { medicines } = useMedicines();
@@ -34,6 +36,17 @@ const FoodCheck = () => {
     () => Array.from(new Set(medicines.filter(item => item.isActive).map(item => item.name).filter(Boolean))),
     [medicines],
   );
+
+  const medicineOptions = useMemo(() => {
+    return Array.from(new Set(medicines.filter(item => item.isActive).map(item => item.name).filter(Boolean))).map(fullName => {
+      const parsed = parseMedicineName(fullName);
+      return {
+        fullName,
+        brandName: parsed.brandName,
+        genericName: parsed.genericName,
+      };
+    });
+  }, [medicines]);
 
   const getAggregatedMedicineUses = async (names: string[]) => {
     const details = await Promise.all(names.map(name => getMedicineDetailsByName(name)));
@@ -195,25 +208,34 @@ const FoodCheck = () => {
   return (
     <div className="container mx-auto max-w-2xl px-4 py-8">
       <div className="mb-6 animate-fade-in">
-        <h1 className="text-2xl font-bold text-foreground">Food Compatibility Check</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Food Compatibility Check</h1>
         <p className="text-muted-foreground">Check if a food is safe with your medication</p>
       </div>
 
-      <div className="mb-6 animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
+      <div className="mb-6 animate-fade-in rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <form onSubmit={handleCheck} className="space-y-4">
           <div>
             <label className="mb-1.5 block text-sm font-medium text-foreground">{t('food.fieldMedicine')}</label>
-            <input value={selectedMed} onChange={e => setSelectedMed(e.target.value)} required placeholder="e.g., Warfarin"
-              list="med-list"
-              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20" />
-            <datalist id="med-list">
-              {medicines.map(m => <option key={m.id} value={m.name} />)}
-            </datalist>
+            <Select value={selectedMed} onValueChange={setSelectedMed}>
+              <SelectTrigger className="w-full rounded-t-lg border-0 border-b-2 border-slate-200 bg-slate-50 text-sm focus:border-[#008080] focus:ring-0">
+                <SelectValue placeholder="Select medicine" />
+              </SelectTrigger>
+              <SelectContent>
+                {medicineOptions.map(option => (
+                  <SelectItem key={option.fullName} value={option.fullName}>
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-foreground">{option.brandName}</span>
+                      {option.genericName && <span className="text-xs text-muted-foreground">{option.genericName}</span>}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-foreground">{t('food.fieldFoodItem')}</label>
             <input value={food} onChange={e => setFood(e.target.value)} required placeholder="e.g., Grapefruit, Milk, Spinach"
-              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20" />
+              className="w-full rounded-t-lg border-0 border-b-2 border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-foreground focus:border-[#008080] focus:outline-none focus:ring-0" />
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-foreground">{t('food.fieldSupplements')}</label>
@@ -221,7 +243,7 @@ const FoodCheck = () => {
               value={supplements}
               onChange={e => setSupplements(e.target.value)}
               placeholder="e.g., Fish oil, Vitamin K"
-              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+              className="w-full rounded-t-lg border-0 border-b-2 border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-foreground focus:border-[#008080] focus:outline-none focus:ring-0"
             />
           </div>
           <div>
@@ -230,12 +252,14 @@ const FoodCheck = () => {
               value={symptoms}
               onChange={e => setSymptoms(e.target.value)}
               placeholder="e.g., nausea, dizziness"
-              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+              className="w-full rounded-t-lg border-0 border-b-2 border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-foreground focus:border-[#008080] focus:outline-none focus:ring-0"
             />
           </div>
-          <button type="submit" disabled={loading} className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Apple className="h-4 w-4" /> Check Compatibility</>}
-          </button>
+          <div className="flex justify-end">
+            <button type="submit" disabled={loading} className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#008080] px-6 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Apple className="h-4 w-4" /> Check Compatibility</>}
+            </button>
+          </div>
         </form>
       </div>
 
@@ -256,7 +280,7 @@ const FoodCheck = () => {
       })()}
 
       {nutritionInsight && (
-        <div className="mt-5 animate-fade-in rounded-xl border border-primary/25 bg-primary/5 p-5">
+        <div className="mt-5 animate-fade-in rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-2 flex items-center gap-2">
             <Apple className="h-5 w-5 text-primary" />
             <h2 className="text-base font-semibold text-foreground">Medication + Disease Nutrition Guidance</h2>
@@ -328,7 +352,7 @@ const FoodCheck = () => {
       )}
 
       {!nutritionInsight && (loadingNutrition || nutritionMessage) && (
-        <div className="mt-5 animate-fade-in rounded-xl border border-primary/20 bg-primary/5 p-5">
+        <div className="mt-5 animate-fade-in rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-2 flex items-center gap-2">
             <Apple className="h-5 w-5 text-primary" />
             <h2 className="text-base font-semibold text-foreground">Medication + Disease Nutrition Guidance</h2>
