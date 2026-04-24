@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
+  ArrowRight,
   ArrowLeft,
   CheckCircle2,
   Clock3,
@@ -12,6 +13,7 @@ import {
   Plus,
   ShieldAlert,
   ShieldCheck,
+  Search,
   Sun,
   Sunset,
 } from 'lucide-react';
@@ -79,6 +81,19 @@ const commonConditionSuggestions = [
   'Infection',
   'Cholesterol',
 ];
+
+const conditionSymbolMap: Record<string, string> = {
+  Hypertension: 'favorite',
+  Diabetes: 'water_drop',
+  Thyroid: 'hourglass_empty',
+  'Cardiac Care': 'cardiology',
+  Asthma: 'air',
+  'Pain Management': 'self_improvement',
+  Infection: 'coronavirus',
+  Cholesterol: 'science',
+};
+
+const quickDrugSuggestions = ['Amoxicillin', 'Lisinopril', 'Metformin'];
 
 const dayOptions = [
   { key: 'mon', label: 'Mon' },
@@ -155,6 +170,7 @@ const AddMedicine = () => {
   const [resolvedGenericPreview, setResolvedGenericPreview] = useState('');
   const [conditionInput, setConditionInput] = useState('');
   const [conditions, setConditions] = useState<string[]>([]);
+  const [showConditionHelp, setShowConditionHelp] = useState(false);
   const [selectedDays, setSelectedDays] = useState<string[]>(dayOptions.map(day => day.key));
   const [selectedSlots, setSelectedSlots] = useState<string[]>(['morning']);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -162,6 +178,7 @@ const AddMedicine = () => {
   const [successState, setSuccessState] = useState<{ open: boolean; nextDose: string }>({ open: false, nextDose: '' });
 
   const drugInputRef = useRef<HTMLInputElement | null>(null);
+  const conditionInputRef = useRef<HTMLInputElement | null>(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -181,6 +198,27 @@ const AddMedicine = () => {
   const selectedSlotDetails = useMemo(
     () => slotOptions.filter(slot => selectedSlots.includes(slot.id)),
     [selectedSlots],
+  );
+
+  const selectedDayPreset = useMemo<'everyday' | 'weekdays' | 'weekends' | null>(() => {
+    const key = [...selectedDays].sort().join('|');
+    if (key === ['fri', 'mon', 'sat', 'sun', 'thu', 'tue', 'wed'].sort().join('|')) return 'everyday';
+    if (key === ['fri', 'mon', 'thu', 'tue', 'wed'].sort().join('|')) return 'weekdays';
+    if (key === ['sat', 'sun'].sort().join('|')) return 'weekends';
+    return null;
+  }, [selectedDays]);
+
+  const selectedConditionSet = useMemo(
+    () => new Set(conditions.map(item => item.toLowerCase())),
+    [conditions],
+  );
+
+  const customConditionCards = useMemo(
+    () =>
+      conditions.filter(
+        condition => !commonConditionSuggestions.some(item => item.toLowerCase() === condition.toLowerCase()),
+      ),
+    [conditions],
   );
 
   const formatDosage = (amount: string, unit: DosageUnit) => {
@@ -471,29 +509,38 @@ const AddMedicine = () => {
 
   return (
     <>
-      <div className="container mx-auto max-w-2xl px-4 py-8">
+      <div className="container mx-auto max-w-4xl px-4 py-8">
         <Link to={user?.role === 'caretaker' ? '/caretaker' : '/dashboard'} className="mb-4 inline-flex min-h-12 items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to {user?.role === 'caretaker' ? 'Portal' : 'Dashboard'}
         </Link>
 
-        <div className="animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
+        <div className="mb-6 animate-fade-in">
+          <div className="mb-2 flex items-center justify-between px-1">
+            <span className="text-sm font-semibold text-[#006565]">Details</span>
+            <span className="text-xs font-medium text-muted-foreground">Step {step} of 3</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full bg-[#008080] transition-all duration-300" style={{ width: `${progressPercent}%` }} />
+          </div>
+          <div className="mt-2 grid grid-cols-3 px-1 text-xs">
+            <span className={`${step === 1 ? 'font-bold text-[#006565]' : 'text-muted-foreground'}`}>Information</span>
+            <span className={`text-center ${step === 2 ? 'font-bold text-[#006565]' : 'text-muted-foreground'}`}>Schedule</span>
+            <span className={`text-right ${step === 3 ? 'font-bold text-[#006565]' : 'text-muted-foreground'}`}>Review</span>
+          </div>
+        </div>
+
+        <div className="animate-fade-in rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-6">
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="rounded-lg gradient-primary p-2.5">
-                  <Pill className="h-5 w-5 text-primary-foreground" />
+                <div className="rounded-lg bg-[#008080]/10 p-2.5">
+                  <Pill className="h-5 w-5 text-[#006565]" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold text-foreground">Add Medicine</h1>
-                  <p className="text-sm text-muted-foreground">Smarter 3-step guided setup</p>
+                  <h1 className="text-2xl font-semibold text-foreground">Add New Medication</h1>
+                  <p className="text-sm text-muted-foreground">Step-by-step guided setup</p>
                 </div>
               </div>
-              <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground">
-                Step {step} of 3
-              </span>
-            </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-              <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
 
@@ -526,6 +573,7 @@ const AddMedicine = () => {
                 <div>
                   <label className="mb-1.5 block text-sm font-medium text-foreground">Drug Name (RxNav)</label>
                   <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
                     <input
                       ref={drugInputRef}
                       value={form.name}
@@ -533,8 +581,8 @@ const AddMedicine = () => {
                         setForm(prev => ({ ...prev, name: e.target.value }));
                         if (nameError) setNameError('');
                       }}
-                      className={`min-h-12 w-full rounded-lg border bg-background px-3 py-3 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20 ${
-                        nameError ? 'border-red-500 ring-1 ring-red-500/30' : 'border-input'
+                      className={`min-h-12 w-full rounded-t-lg border-0 border-b-2 bg-slate-50 py-3 pl-10 pr-3 text-sm text-foreground focus:border-[#008080] focus:outline-none focus:ring-0 ${
+                        nameError ? 'border-red-500' : 'border-slate-200'
                       }`}
                       placeholder="Search by brand or generic name"
                     />
@@ -542,6 +590,22 @@ const AddMedicine = () => {
                   </div>
                   {resolvedGenericPreview && <p className="mt-1 text-xs text-primary">Resolved generic: {resolvedGenericPreview}</p>}
                   {nameError && <p className="mt-1 text-xs font-semibold text-red-600">{nameError}</p>}
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {quickDrugSuggestions.map(drug => (
+                      <button
+                        key={drug}
+                        type="button"
+                        onClick={() => {
+                          setForm(prev => ({ ...prev, name: drug }));
+                          setNameError('');
+                        }}
+                        className="min-h-10 rounded-full border border-[#8bded6] bg-[#e9faf7] px-4 text-xs font-semibold text-[#006565] transition-colors hover:bg-[#dff5f2]"
+                      >
+                        {drug}
+                      </button>
+                    ))}
+                  </div>
 
                   {suggestions.length > 0 && (
                     <div className="mt-2 max-h-56 overflow-auto rounded-xl border border-border bg-card/95 p-1 shadow-elevated backdrop-blur-sm">
@@ -566,7 +630,7 @@ const AddMedicine = () => {
 
                 <div>
                   <label className="mb-1.5 block text-sm font-medium text-foreground">Dosage</label>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="flex items-center gap-2 rounded-xl border border-input bg-background p-2">
                       <button
                         type="button"
@@ -611,8 +675,8 @@ const AddMedicine = () => {
                           onClick={() => setForm(prev => ({ ...prev, dosageUnit: option.value }))}
                           className={`min-h-12 rounded-lg px-3 text-sm font-semibold transition-colors ${
                             form.dosageUnit === option.value
-                              ? 'bg-primary text-primary-foreground shadow-card'
-                              : 'text-muted-foreground hover:bg-muted'
+                              ? 'bg-[#008080] text-white shadow-card'
+                              : 'border border-slate-200 text-muted-foreground hover:bg-muted'
                           }`}
                         >
                           {option.label}
@@ -623,56 +687,109 @@ const AddMedicine = () => {
                 </div>
 
                 <div>
-                  <label className="mb-1.5 block text-sm font-medium text-foreground">What condition is this for?</label>
-                  <div className="flex gap-2">
-                    <input
-                      value={conditionInput}
-                      onChange={e => setConditionInput(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' || e.key === ',') {
-                          e.preventDefault();
-                          addCondition(conditionInput);
-                        }
-                      }}
-                      className="min-h-12 w-full rounded-lg border border-input bg-background px-3 py-3 text-sm text-foreground focus:border-primary focus:outline-none"
-                      placeholder="Type a condition and press Enter"
-                    />
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label className="block text-sm font-medium text-foreground">What condition is this for?</label>
                     <button
                       type="button"
-                      onClick={() => addCondition(conditionInput)}
-                      className="min-h-12 rounded-lg border border-primary px-4 text-sm font-semibold text-primary hover:bg-accent"
+                      onClick={() => setShowConditionHelp(prev => !prev)}
+                      className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
                     >
-                      Add
+                      Why we ask
                     </button>
                   </div>
 
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {commonConditionSuggestions.map(condition => (
-                      <button
-                        key={condition}
-                        type="button"
-                        onClick={() => addCondition(condition)}
-                        className="min-h-12 rounded-full border border-border px-4 text-sm font-medium text-muted-foreground hover:bg-muted"
-                      >
-                        {condition}
-                      </button>
-                    ))}
+                  {showConditionHelp && (
+                    <p className="mb-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
+                      Providing a condition helps generate better food and interaction recommendations for you.
+                    </p>
+                  )}
+
+                  <div className="flex gap-2">
+                    <div className="relative w-full">
+                      <span className="material-symbols-outlined pointer-events-none absolute left-3 top-3 text-base text-slate-400">search</span>
+                      <input
+                        ref={conditionInputRef}
+                        value={conditionInput}
+                        onChange={e => setConditionInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' || e.key === ',') {
+                            e.preventDefault();
+                            addCondition(conditionInput);
+                          }
+                        }}
+                        className="min-h-12 w-full rounded-lg border border-input bg-background py-3 pl-9 pr-3 text-sm text-foreground focus:border-primary focus:outline-none"
+                        placeholder="Search or add condition..."
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => addCondition(conditionInput)}
+                      className="min-h-12 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-foreground hover:bg-muted"
+                    >
+                      + Add
+                    </button>
                   </div>
 
-                  {conditions.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {conditions.map(condition => (
+                  <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    {commonConditionSuggestions.map(condition => {
+                      const isSelected = selectedConditionSet.has(condition.toLowerCase());
+                      return (
                         <button
                           key={condition}
                           type="button"
-                          onClick={() => setConditions(prev => prev.filter(item => item !== condition))}
-                          className="min-h-12 rounded-full border border-primary bg-accent px-4 text-sm font-semibold text-accent-foreground"
+                          onClick={() => {
+                            if (isSelected) {
+                              setConditions(prev => prev.filter(item => item.toLowerCase() !== condition.toLowerCase()));
+                            } else {
+                              addCondition(condition);
+                            }
+                          }}
+                          className={`flex h-[90px] w-full flex-col items-center justify-center gap-2 rounded-lg border bg-white px-2 text-center transition-colors ${
+                            isSelected
+                              ? 'border-2 border-[#1D9E75] bg-[#ecfaf6] text-[#1D9E75]'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
                         >
-                          {condition} x
+                          <span className="material-symbols-outlined text-[22px]">{conditionSymbolMap[condition] || 'help_circle'}</span>
+                          <span className="text-[11px] font-medium leading-tight">{condition}</span>
                         </button>
-                      ))}
-                    </div>
-                  )}
+                      );
+                    })}
+
+                    {customConditionCards.map(condition => {
+                      const isSelected = selectedConditionSet.has(condition.toLowerCase());
+                      return (
+                        <button
+                          key={`custom-${condition}`}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setConditions(prev => prev.filter(item => item.toLowerCase() !== condition.toLowerCase()));
+                            } else {
+                              addCondition(condition);
+                            }
+                          }}
+                          className={`flex h-[90px] w-full flex-col items-center justify-center gap-2 rounded-lg border bg-white px-2 text-center transition-colors ${
+                            isSelected
+                              ? 'border-2 border-[#1D9E75] bg-[#ecfaf6] text-[#1D9E75]'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[22px]">add_circle</span>
+                          <span className="text-[11px] font-medium leading-tight">{condition}</span>
+                        </button>
+                      );
+                    })}
+
+                    <button
+                      type="button"
+                      onClick={() => conditionInputRef.current?.focus()}
+                      className="flex h-[90px] w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-2 text-center text-slate-600 transition-colors hover:bg-slate-50"
+                    >
+                      <span className="material-symbols-outlined text-[22px]">help_circle</span>
+                      <span className="text-[11px] font-medium leading-tight">Other Condition</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -682,13 +799,37 @@ const AddMedicine = () => {
                 <div>
                   <label className="mb-2 block text-sm font-medium text-foreground">Schedule Days</label>
                   <div className="mb-2 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => selectDayPreset('everyday')} className="min-h-12 rounded-lg border border-border px-4 text-sm font-semibold hover:bg-muted">
+                    <button
+                      type="button"
+                      onClick={() => selectDayPreset('everyday')}
+                      className={`min-h-10 rounded-full border px-4 text-sm font-semibold transition-colors ${
+                        selectedDayPreset === 'everyday'
+                          ? 'border-[#1D9E75] text-[#1D9E75] bg-[#ecfaf6]'
+                          : 'border-slate-200 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
                       Every day
                     </button>
-                    <button type="button" onClick={() => selectDayPreset('weekdays')} className="min-h-12 rounded-lg border border-border px-4 text-sm font-semibold hover:bg-muted">
+                    <button
+                      type="button"
+                      onClick={() => selectDayPreset('weekdays')}
+                      className={`min-h-10 rounded-full border px-4 text-sm font-semibold transition-colors ${
+                        selectedDayPreset === 'weekdays'
+                          ? 'border-[#1D9E75] text-[#1D9E75] bg-[#ecfaf6]'
+                          : 'border-slate-200 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
                       Weekdays only
                     </button>
-                    <button type="button" onClick={() => selectDayPreset('weekends')} className="min-h-12 rounded-lg border border-border px-4 text-sm font-semibold hover:bg-muted">
+                    <button
+                      type="button"
+                      onClick={() => selectDayPreset('weekends')}
+                      className={`min-h-10 rounded-full border px-4 text-sm font-semibold transition-colors ${
+                        selectedDayPreset === 'weekends'
+                          ? 'border-[#1D9E75] text-[#1D9E75] bg-[#ecfaf6]'
+                          : 'border-slate-200 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
                       Weekends
                     </button>
                   </div>
@@ -701,8 +842,8 @@ const AddMedicine = () => {
                         onClick={() => toggleDay(day.key)}
                         className={`min-h-12 rounded-lg border text-sm font-semibold transition-colors ${
                           selectedDays.includes(day.key)
-                            ? 'border-primary bg-accent text-accent-foreground'
-                            : 'border-border text-muted-foreground hover:bg-muted'
+                            ? 'border-[#1D9E75] bg-[#ecfaf6] text-[#1D9E75]'
+                            : 'border-slate-200 text-muted-foreground hover:bg-muted'
                         }`}
                       >
                         {day.label}
@@ -722,10 +863,10 @@ const AddMedicine = () => {
                           key={slot.id}
                           type="button"
                           onClick={() => toggleSlot(slot.id)}
-                          className={`min-h-12 rounded-xl border p-3 text-left transition-colors ${
+                          className={`rounded-xl border p-4 text-left transition-colors ${
                             active
-                              ? 'border-primary bg-accent text-accent-foreground'
-                              : 'border-border text-muted-foreground hover:bg-muted'
+                              ? 'border-[#1D9E75] bg-[#ecfaf6] text-[#1D9E75]'
+                              : 'border-slate-200 bg-white text-muted-foreground hover:bg-muted'
                           }`}
                         >
                           <div className="mb-1 flex items-center gap-2">
@@ -741,16 +882,16 @@ const AddMedicine = () => {
 
                 <div>
                   <label className="mb-1.5 block text-sm font-medium text-foreground">Food Timing</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-1 rounded-xl border border-input bg-background p-1.5">
                     {foodTimingOptions.map(option => (
                       <button
                         key={option.value}
                         type="button"
                         onClick={() => setForm(prev => ({ ...prev, foodTiming: option.value }))}
-                        className={`min-h-12 rounded-xl border px-4 text-base font-semibold transition-colors ${
+                        className={`min-h-12 rounded-lg px-4 text-sm font-semibold transition-colors ${
                           form.foodTiming === option.value
-                            ? 'border-primary bg-accent text-accent-foreground'
-                            : 'border-border text-muted-foreground hover:bg-muted'
+                            ? 'bg-[#008080] text-white shadow-card'
+                            : 'border border-slate-200 text-muted-foreground hover:bg-muted'
                         }`}
                       >
                         {option.label}
@@ -769,7 +910,7 @@ const AddMedicine = () => {
                     value={form.category}
                     onValueChange={value => setForm(prev => ({ ...prev, category: value as typeof form.category }))}
                   >
-                    <SelectTrigger className="min-h-12 w-full rounded-lg">
+                    <SelectTrigger className="min-h-12 w-full rounded-lg border-slate-200 bg-white px-3">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent className="rounded-xl border-border shadow-elevated">
@@ -794,10 +935,10 @@ const AddMedicine = () => {
                           key={option.value}
                           type="button"
                           onClick={() => setForm(prev => ({ ...prev, criticality: option.value }))}
-                          className={`min-h-12 rounded-xl border p-3 text-left transition-colors ${
+                          className={`flex h-[110px] flex-col items-start justify-center rounded-lg border p-3 text-left transition-colors ${
                             active
-                              ? 'border-primary bg-accent text-accent-foreground'
-                              : 'border-border text-muted-foreground hover:bg-muted'
+                              ? 'border-2 border-[#1D9E75] bg-[#ecfaf6] text-[#1D9E75]'
+                              : 'border-slate-200 bg-white text-muted-foreground hover:bg-muted'
                           }`}
                         >
                           <div className="mb-1 flex items-center gap-2">
@@ -843,32 +984,78 @@ const AddMedicine = () => {
               </div>
             )}
 
-            <div className="flex gap-2">
-              {step > 1 && (
+            {step === 1 ? (
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => navigate(user?.role === 'caretaker' ? '/caretaker' : '/dashboard')}
+                  className="min-h-12 rounded-lg px-4 text-sm font-semibold text-muted-foreground hover:bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#008080] px-6 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  Continue to Schedule <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => setStep(prev => (prev > 1 ? ((prev - 1) as WizardStep) : prev))}
-                  className="min-h-12 w-full rounded-lg border border-border px-4 text-sm font-semibold text-muted-foreground hover:bg-muted"
+                  className="min-h-12 rounded-lg border border-slate-200 px-6 text-sm font-semibold text-muted-foreground hover:bg-muted"
                 >
                   Back
                 </button>
-              )}
-              <button
-                type="submit"
-                disabled={loading}
-                className="gradient-primary flex min-h-12 w-full items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : step === 3 ? (
-                  'Add Medicine'
-                ) : (
-                  'Next'
-                )}
-              </button>
-            </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#008080] px-6 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : step === 3 ? (
+                    <>
+                      Add Medicine <CheckCircle2 className="h-4 w-4" />
+                    </>
+                  ) : (
+                    <>
+                      Next <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </form>
         </div>
+
+        {step === 1 && (
+          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="md:col-span-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="rounded-lg bg-[#e9faf7] p-2 text-[#006565]">
+                  <ShieldCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-foreground">Medication Safety</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Always verify dose and timing with your physician before starting a new regimen.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl bg-[#008080] p-5 text-white shadow-sm">
+              <h3 className="text-base font-semibold">Need help?</h3>
+              <p className="mt-1 text-sm text-white/90">Our care team can help you complete medication setup.</p>
+              <button type="button" className="mt-3 rounded-lg bg-white/20 px-3 py-2 text-xs font-semibold hover:bg-white/30">
+                Message Support
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {successState.open && (

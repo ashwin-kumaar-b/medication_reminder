@@ -71,12 +71,12 @@ const SettingsPanel = () => {
   return (
     <div className="container mx-auto max-w-2xl space-y-6 px-4 py-8">
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-bold text-foreground">{t('settings.title')}</h1>
+        <h1 className="text-2xl font-semibold text-foreground">{t('settings.title')}</h1>
         <p className="text-muted-foreground">{t('settings.subtitle')}</p>
       </div>
 
       {user?.role === 'patient' && (
-        <div className="rounded-xl border border-border bg-card p-6 shadow-elevated animate-fade-in">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm animate-fade-in">
           <h2 className="mb-4 text-lg font-semibold text-foreground flex items-center gap-2">
             <UserCircle className="h-5 w-5 text-primary" /> My Profile
           </h2>
@@ -163,7 +163,7 @@ const SettingsPanel = () => {
         </div>
       )}
 
-      <div className="space-y-5 rounded-xl border border-border bg-card p-6 shadow-elevated animate-fade-in">
+      <div className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm animate-fade-in">
         <h2 className="mb-4 text-lg font-semibold text-foreground">App Preferences</h2>
         <div>
           <label className="mb-1.5 block text-sm font-medium text-foreground">{t('settings.language')}</label>
@@ -210,8 +210,9 @@ const SettingsPanel = () => {
         <button
           type="button"
           onClick={playPreview}
-          className="gradient-primary rounded-lg px-4 py-2 text-sm font-semibold text-primary-foreground"
+          className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#008080] px-5 text-sm font-semibold text-white hover:opacity-90"
         >
+          <RefreshCw className="h-4 w-4" />
           {t('settings.preview')}
         </button>
       </div>

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMedicines } from '@/contexts/MedicineContext';
 import { useToast } from '@/hooks/use-toast';
-import { Pill, Trash2, Clock, Plus, Pencil } from 'lucide-react';
+import { Pill, Trash2, Clock, Plus, Pencil, ClipboardList } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { getMedicineDetailsByName } from '@/lib/localMedicineData';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { parseMedicineName, trimGenericFormDescriptor } from '@/utils/medicineUtils';
+
+const MED_COLORS = ['#1D9E75', '#D85A30', '#378ADD', '#BA7517', '#7F77DD', '#D4537E'];
 
 const Medicines = () => {
   const { removeMedicine, medications } = useMedicines();
@@ -131,10 +134,10 @@ const Medicines = () => {
       )}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">My Medicines</h1>
+          <h1 className="text-2xl font-semibold text-foreground">My Medicines</h1>
           <p className="text-muted-foreground">Manage your medication list</p>
         </div>
-        <Link to={`/add-medicine${user?.role === 'caretaker' ? `?patientId=${selectedPatientId}` : ''}`} className="gradient-primary inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90">
+        <Link to={`/add-medicine${user?.role === 'caretaker' ? `?patientId=${selectedPatientId}` : ''}`} className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#008080] px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90">
           <Plus className="h-4 w-4" /> Add New
         </Link>
       </div>
@@ -149,51 +152,80 @@ const Medicines = () => {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {displayedMedicines.map((med, i) => (
-            <div key={med.id} className="animate-fade-in rounded-xl border border-border bg-card p-5 shadow-card transition-all hover:shadow-elevated" style={{ animationDelay: `${i * 0.05}s` }}>
+            <div
+              key={med.id}
+              className="animate-fade-in rounded-[16px] border border-border border-l-4 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.05)] transition-all hover:shadow-md lg:max-w-[400px]"
+              style={{ animationDelay: `${i * 0.05}s`, borderLeftColor: MED_COLORS[i % MED_COLORS.length] }}
+            >
               {(() => {
-                const genericName = med.genericName;
                 const substitutes = substituteById[med.id] || [];
 
                 return (
                   <>
-              <div className="mb-3 flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  {med.photoUrl ? (
-                    <img
-                      src={med.photoUrl}
-                      alt={`${med.name} photo`}
-                      className="h-10 w-10 rounded-lg border border-border object-cover"
-                    />
-                  ) : (
-                    <div className={`rounded-lg p-2 ${med.isActive ? 'bg-accent text-primary' : 'bg-muted text-muted-foreground'}`}>
-                      <Pill className="h-5 w-5" />
+                    <div className="mb-4 flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        {med.photoUrl ? (
+                          <img
+                            src={med.photoUrl}
+                            alt={`${med.name} photo`}
+                            className="h-10 w-10 shrink-0 rounded-full border border-border object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#1D9E75]/10 text-[#1D9E75]">
+                            <Pill className="h-5 w-5" />
+                          </div>
+                        )}
+                        <div className="flex flex-col">
+                          {(() => {
+                            const parsed = parseMedicineName(med.name);
+                            const shortGeneric = trimGenericFormDescriptor(parsed.genericName);
+                            return (
+                              <>
+                                <h3 className="font-bold text-[16px] text-foreground leading-tight">{parsed.brandName}</h3>
+                                {shortGeneric && (
+                                  <p className="mt-0.5 text-[13px] text-muted-foreground">{shortGeneric}</p>
+                                )}
+                                <p className="mt-0.5 text-[13px] text-muted-foreground">{med.dosage}</p>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                      <span className={`mr-1 mt-1 inline-flex shrink-0 items-center justify-center rounded-full px-2.5 py-0.5 text-[12px] font-semibold tracking-wide ${med.isActive ? 'bg-[#1D9E75]/10 text-[#1D9E75]' : 'bg-muted text-muted-foreground'}`}>
+                        {med.isActive ? 'Active' : 'Completed'}
+                      </span>
                     </div>
-                  )}
-                  <div>
-                    <h3 className="font-semibold text-foreground">{med.name}</h3>
-                    <p className="text-sm text-muted-foreground">{med.dosage}</p>
-                    {genericName && genericName.toLowerCase() !== med.name.toLowerCase() && (
-                      <p className="text-xs text-muted-foreground">Generic: {genericName}</p>
-                    )}
-                  </div>
-                </div>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${med.isActive ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}>
-                  {med.isActive ? 'Active' : 'Completed'}
-                </span>
-              </div>
-              <div className="mb-3 space-y-1 text-sm text-muted-foreground">
-                <div className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> {med.frequency} — {med.timeSlots.join(', ')}</div>
-                {med.foodInstructions && <p className="italic">📋 {med.foodInstructions}</p>}
-                {substitutes.length > 0 && <p className="text-xs">Similar medicines: {substitutes.join(', ')}</p>}
-              </div>
-              <div className="flex justify-end gap-2">
-                <Link to={`/edit-medicine/${med.id}`} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-foreground hover:bg-muted">
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </Link>
-                <button onClick={() => void handleDelete(med.sourceIds, med.name)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10">
-                  <Trash2 className="h-3.5 w-3.5" /> Remove
-                </button>
-              </div>
+
+                    <hr className="mb-3 border-t border-border/60" />
+
+                    <div className="mb-4 space-y-2.5 text-[13px] text-muted-foreground">
+                      <div className="flex items-center gap-2.5">
+                        <Clock className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                        <span>{med.frequency === 'daily' ? 'daily' : med.frequency} — {med.timeSlots.join(', ')}</span>
+                      </div>
+                      {med.foodInstructions && (
+                        <div className="flex items-center gap-2.5">
+                          <ClipboardList className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                          <span className="italic">{med.foodInstructions}</span>
+                        </div>
+                      )}
+                      {substitutes.length > 0 && (
+                        <div className="flex items-center gap-2.5 text-[12px] pt-1">
+                          <span>Similar: {substitutes.join(', ')}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <hr className="mb-3 border-t border-border/60" />
+
+                    <div className="flex items-center gap-3">
+                      <Link to={`/edit-medicine/${med.id}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted">
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </Link>
+                      <button onClick={() => void handleDelete(med.sourceIds, med.name)} className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-destructive/30 px-3 py-2 text-[13px] font-medium text-destructive transition-colors hover:bg-destructive/5 hover:border-destructive/50">
+                        <Trash2 className="h-3.5 w-3.5" /> Remove
+                      </button>
+                    </div>
                   </>
                 );
               })()}

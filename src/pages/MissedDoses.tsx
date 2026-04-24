@@ -3,17 +3,10 @@ import { useMedicines } from '@/contexts/MedicineContext';
 import { BarChart3, TrendingUp, AlertTriangle, Loader2, FlaskConical } from 'lucide-react';
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { getMissedDoseRecoveryAdvice, MissedDoseRecoveryAdvice } from '@/lib/medicationApis';
+import { parseMedicineName } from '@/utils/medicineUtils';
 
 // Deterministic color palette
 const MED_COLORS = ["#1D9E75", "#D85A30", "#378ADD", "#BA7517", "#7F77DD", "#D4537E"];
-
-const getShortMedicineName = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return 'Medicine';
-  const bracketMatch = trimmed.match(/\[([^\]]+)\]/);
-  if (bracketMatch?.[1]) return bracketMatch[1].trim();
-  return trimmed.split(' ')[0];
-};
 
 const getWeekStart = () => {
   const date = new Date();
@@ -39,7 +32,7 @@ const MissedDoses = () => {
   const uniqueMedicines = useMemo(() => {
     const map = new Map<string, typeof medicines[0] & { sourceIds: string[] }>();
     medicines.forEach(med => {
-      const nameKey = getShortMedicineName(med.name).toLowerCase();
+      const nameKey = parseMedicineName(med.name).brandName.toLowerCase();
       const key = `${nameKey}|${med.dosage || ''}`;
       const existing = map.get(key);
       if (existing) {
@@ -187,7 +180,7 @@ const MissedDoses = () => {
                 return (
                   <div key={`legend-${med.id}`} className="flex items-center gap-1.5">
                     <div className="w-[10px] h-[10px] rounded-[2px]" style={{ backgroundColor: color }} />
-                    <span className="text-[13px] text-muted-foreground font-medium whitespace-nowrap">{getShortMedicineName(med.name)}</span>
+                    <span className="text-[13px] text-muted-foreground font-medium whitespace-nowrap">{parseMedicineName(med.name).brandName}</span>
                   </div>
                 );
               })}
@@ -251,7 +244,7 @@ const MissedDoses = () => {
                   <div className="flex items-center gap-3">
                     <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
                     <div className="flex flex-col">
-                      <span className="font-semibold text-[15px] text-foreground">{getShortMedicineName(med.name)}</span>
+                      <span className="font-semibold text-[15px] text-foreground">{parseMedicineName(med.name).brandName}</span>
                       <span className="text-[12px] text-muted-foreground">{stats.taken} taken / {stats.missed} missed</span>
                     </div>
                   </div>
@@ -277,7 +270,7 @@ const MissedDoses = () => {
                 <div key={`decisions-${med.id}`} className="rounded-xl border border-destructive/25 bg-destructive/5 p-4 shadow-sm">
                   <div className="mb-3 flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-destructive" />
-                    <h3 className="font-semibold text-destructive uppercase tracking-wide text-xs">Missed Dose Decisions: {getShortMedicineName(med.name)}</h3>
+                    <h3 className="font-semibold text-destructive uppercase tracking-wide text-xs">Missed Dose Decisions: {parseMedicineName(med.name).brandName}</h3>
                   </div>
 
                   <div className="space-y-3">

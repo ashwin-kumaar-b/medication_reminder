@@ -6,14 +6,7 @@ import { Pill, Clock, AlertTriangle, Plus, GitCompareArrows, XCircle, BellRing, 
 import { useToast } from '@/hooks/use-toast';
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { getMissedDoseSeverityInsight, MissedDoseSeverityInsight } from '@/lib/medicationApis';
-
-const getShortMedicineName = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return 'Medicine';
-  const bracketMatch = trimmed.match(/\[([^\]]+)\]/);
-  if (bracketMatch?.[1]) return bracketMatch[1].trim();
-  return trimmed.split(' ')[0];
-};
+import { parseMedicineName } from '@/utils/medicineUtils';
 
 const Dashboard = () => {
   const { user, createPatientForCaretaker, getLinkedPatients } = useAuth();
@@ -107,10 +100,10 @@ const Dashboard = () => {
   const rangeLabel = statsRange === 'daily' ? t('common.today') : t('common.thisWeek');
 
   const cards = [
-    { label: t('dashboard.activeMedicines'), value: activeMeds.length, icon: Pill, color: 'text-[#1D9E75] bg-[#1D9E75]/10' },
-    { label: `${t('dashboard.taken')} ${rangeLabel}`, value: takenCount, icon: Clock, color: 'text-success bg-success/10' },
-    { label: `${t('dashboard.missed')} ${rangeLabel}`, value: missedCount, icon: XCircle, color: 'text-destructive bg-destructive/10' },
-    { label: t('dashboard.totalMedicines'), value: medicines.length, icon: AlertTriangle, color: 'text-warning bg-warning/10' },
+    { label: t('dashboard.activeMedicines'), value: activeMeds.length, icon: Pill, color: 'text-[#1D9E75] bg-[#1D9E75]/10', topBorder: '#1D9E75' },
+    { label: `${t('dashboard.taken')} ${rangeLabel}`, value: takenCount, icon: Clock, color: 'text-success bg-success/10', topBorder: '#22C55E' },
+    { label: `${t('dashboard.missed')} ${rangeLabel}`, value: missedCount, icon: XCircle, color: 'text-destructive bg-destructive/10', topBorder: '#EF4444' },
+    { label: t('dashboard.totalMedicines'), value: medicines.length, icon: AlertTriangle, color: 'text-warning bg-warning/10', topBorder: '#F59E0B' },
   ];
 
   const timelineItems = useMemo(() => {
@@ -134,7 +127,7 @@ const Dashboard = () => {
 
         return {
           id: item.medication.id,
-          shortName: getShortMedicineName(item.medication.displayName || item.medication.drugName),
+          shortName: parseMedicineName(item.medication.displayName || item.medication.drugName).brandName,
           fullName: item.medication.displayName || item.medication.drugName,
           dose: item.medication.dosage,
           time: item.medication.scheduleTime,
@@ -168,6 +161,7 @@ const Dashboard = () => {
 
         return {
           drugName: medication.name || 'Medication',
+          brandName: parseMedicineName(medication.name || 'Medication').brandName,
           category: 'other',
           criticality: 'medium',
           missedCount: medMissedLogs.length,
@@ -176,6 +170,7 @@ const Dashboard = () => {
       })
       .filter(Boolean) as Array<{
       drugName: string;
+      brandName: string;
       category: string;
       criticality: string;
       missedCount: number;
@@ -193,7 +188,7 @@ const Dashboard = () => {
   );
 
   const missedDrugNames = useMemo(
-    () => missedMedicationRows.map(item => item.drugName).filter(Boolean).join(', '),
+    () => missedMedicationRows.map(item => item.brandName).filter(Boolean).join(', '),
     [missedMedicationRows],
   );
 
@@ -203,7 +198,7 @@ const Dashboard = () => {
     if (missedMedicationRows.length === 1) {
       const row = missedMedicationRows[0];
       const doseLabel = row.missedCount > 1 ? 'doses' : 'dose';
-      return `You missed ${row.missedCount} ${doseLabel} of ${row.drugName}.`;
+      return `You missed ${row.missedCount} ${doseLabel} of ${row.brandName}.`;
     }
 
     const totalMissed = missedMedicationRows.reduce((sum, item) => sum + item.missedCount, 0);
@@ -482,7 +477,7 @@ const Dashboard = () => {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-foreground">Caretaker Dashboard</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Caretaker Dashboard</h1>
           <p className="text-muted-foreground">Manage linked patients and monitor medication risk stability.</p>
         </div>
 
@@ -637,7 +632,7 @@ const Dashboard = () => {
       {/* Welcome */}
       <div className="mb-8 animate-fade-in">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <h1 className="text-2xl font-bold text-foreground">{t('dashboard.welcomeBack')}, {user?.name || 'User'} 👋</h1>
+          <h1 className="text-2xl font-semibold text-foreground">{t('dashboard.welcomeBack')}, {user?.name || 'User'} 👋</h1>
           <button
             type="button"
             onClick={() => void handleEmergencySos()}
@@ -694,8 +689,12 @@ const Dashboard = () => {
         </div>
       </div>
       <div key={statsRange} className="mb-8 grid animate-fade-in gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {cards.map(({ label, value, icon: Icon, color }, i) => (
-          <div key={label} className="animate-fade-in rounded-2xl border border-border/80 bg-card p-5 shadow-card" style={{ animationDelay: `${i * 0.1}s` }}>
+        {cards.map(({ label, value, icon: Icon, color, topBorder }, i) => (
+          <div
+            key={label}
+            className="animate-fade-in rounded-2xl border border-border/80 border-t-4 bg-white p-5 shadow-card"
+            style={{ animationDelay: `${i * 0.1}s`, borderTopColor: topBorder }}
+          >
             <div className="flex items-start justify-between">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
               <div className={`rounded-xl p-2 ${color}`}>
@@ -708,7 +707,7 @@ const Dashboard = () => {
       </div>
 
       {missedMedicationRows.length > 0 && (
-        <section className="mb-8 rounded-xl border-2 border-destructive/50 bg-gradient-to-br from-destructive/10 via-card to-destructive/5 p-5 shadow-elevated">
+        <section className="mb-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-destructive/15 text-destructive animate-pulse">
@@ -762,7 +761,7 @@ const Dashboard = () => {
         </section>
       )}
 
-      <section className="mb-8 rounded-xl border border-border bg-card p-5 shadow-card">
+      <section className="mb-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">
             {timelineItems.length > 1 ? t('dashboard.nextMedicinePlural') : t('dashboard.nextMedicineSingle')}

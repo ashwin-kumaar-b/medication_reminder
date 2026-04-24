@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { GitCompareArrows, Loader2, AlertTriangle, CheckCircle, XCircle, ShieldAlert, ChevronDown } from 'lucide-react';
+import { GitCompareArrows, Loader2, AlertTriangle, CheckCircle, XCircle, ShieldAlert, ChevronDown, ArrowRight } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useMedicines } from '@/contexts/MedicineContext';
 import {
@@ -13,6 +13,7 @@ import {
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { getMedicineDetailsByName } from '@/lib/localMedicineData';
+import { parseMedicineName } from '@/utils/medicineUtils';
 
 interface InteractionResult {
   severity: 'high' | 'moderate' | 'low' | 'none';
@@ -21,19 +22,13 @@ interface InteractionResult {
   source?: 'RxNav' | 'DailyMed' | 'Gemini' | 'DDInter';
 }
 
-const getShortMedicineName = (value: string) => {
+const toNormalSentenceCase = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return 'Medicine';
-  const bracketMatch = trimmed.match(/\[([^\]]+)\]/);
-  if (bracketMatch?.[1]) return bracketMatch[1].trim();
-
-  const tokens = trimmed
-    .replace(/\([^)]*\)/g, ' ')
-    .split(/\s+/)
-    .map(token => token.replace(/[^A-Za-z]/g, ''))
-    .filter(Boolean);
-
-  return (tokens[0] || trimmed).replace(/^./, c => c.toUpperCase());
+  if (trimmed === trimmed.toUpperCase()) {
+    return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1).toLowerCase()}`;
+  }
+  return trimmed;
 };
 
 const normalizeSeverity = (severity: InteractionResult['severity']) => {
@@ -117,16 +112,16 @@ const InteractionChecker = () => {
   const groupedInteractionResults = useMemo(() => {
     const normalized = results.map((row, index) => {
       const severity = normalizeSeverity(row.severity);
-      const shortDrugA = getShortMedicineName(row.drugs[0] || 'Medicine A');
-      const shortDrugB = getShortMedicineName(row.drugs[1] || 'Medicine B');
+      const shortDrugA = toNormalSentenceCase(parseMedicineName(row.drugs[0] || 'Medicine A').brandName);
+      const shortDrugB = toNormalSentenceCase(parseMedicineName(row.drugs[1] || 'Medicine B').brandName);
       const summary = `${row.description.replace(/\s+/g, ' ').trim()} - Source: ${row.source === 'RxNav' ? 'NLM RxNav' : row.source || 'RxNav'}`;
       return {
         key: `${row.drugs.join('-')}-${index}`,
         severity,
         shortDrugA,
         shortDrugB,
-        fullDrugA: row.drugs[0] || 'Unknown medicine',
-        fullDrugB: row.drugs[1] || 'Unknown medicine',
+        fullDrugA: shortDrugA,
+        fullDrugB: shortDrugB,
         summary,
         fullDescription: row.description,
         source: row.source === 'RxNav' ? 'NLM RxNav' : row.source || 'RxNav',
@@ -373,11 +368,11 @@ const InteractionChecker = () => {
   return (
     <div className="container mx-auto max-w-2xl px-4 py-8">
       <div className="mb-6 animate-fade-in">
-        <h1 className="text-2xl font-bold text-foreground">Drug Interaction Checker</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Drug Interaction Checker</h1>
         <p className="text-muted-foreground">Auto-checks your active medicines and shows all interaction pairs</p>
       </div>
 
-      <div className="mb-6 animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
+      <div className="mb-6 animate-fade-in rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">Your Active Medicines</h2>
           <div className="flex gap-2">
@@ -404,7 +399,9 @@ const InteractionChecker = () => {
         ) : (
           <div className="flex flex-wrap gap-2">
             {activeMedicineNames.map(name => (
-              <span key={name} className="rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">{name}</span>
+              <span key={name} className="rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-foreground">
+                {toNormalSentenceCase(parseMedicineName(name).brandName)}
+              </span>
             ))}
           </div>
         )}
@@ -566,19 +563,19 @@ const InteractionChecker = () => {
         )}
       </div>
 
-      <div className="mb-6 animate-fade-in rounded-xl border border-border bg-card p-6 shadow-elevated">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Manual pair check</p>
+      <div className="mb-6 animate-fade-in rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Manual pair check</p>
         <form onSubmit={handleCheck} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-foreground">{t('interaction.fieldDrug1')}</label>
               <input value={drug1} onChange={e => setDrug1(e.target.value)} required placeholder="e.g., Warfarin"
-                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20" />
+                className="w-full rounded-t-lg border-0 border-b-2 border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-foreground focus:border-[#008080] focus:outline-none focus:ring-0" />
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-foreground">{t('interaction.fieldDrug2')}</label>
               <input value={drug2} onChange={e => setDrug2(e.target.value)} required placeholder="e.g., Aspirin"
-                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20" />
+                className="w-full rounded-t-lg border-0 border-b-2 border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-foreground focus:border-[#008080] focus:outline-none focus:ring-0" />
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -588,7 +585,7 @@ const InteractionChecker = () => {
                 value={supplements}
                 onChange={e => setSupplements(e.target.value)}
                 placeholder="e.g., Fish oil, St. John's wort"
-                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+                className="w-full rounded-t-lg border-0 border-b-2 border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-foreground focus:border-[#008080] focus:outline-none focus:ring-0"
               />
             </div>
             <div>
@@ -597,13 +594,15 @@ const InteractionChecker = () => {
                 value={symptoms}
                 onChange={e => setSymptoms(e.target.value)}
                 placeholder="e.g., dizziness, nausea"
-                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/20"
+                className="w-full rounded-t-lg border-0 border-b-2 border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-foreground focus:border-[#008080] focus:outline-none focus:ring-0"
               />
             </div>
           </div>
-          <button type="submit" disabled={loading} className="gradient-primary flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><GitCompareArrows className="h-4 w-4" /> Check Interactions</>}
-          </button>
+          <div className="flex justify-end">
+            <button type="submit" disabled={loading} className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-[#008080] px-6 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <><GitCompareArrows className="h-4 w-4" /> Check Interactions <ArrowRight className="h-4 w-4" /></>}
+            </button>
+          </div>
         </form>
       </div>
 
