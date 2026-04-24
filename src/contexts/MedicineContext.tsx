@@ -273,7 +273,23 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
       supabase.from('notifications').select('*').order('created_at', { ascending: false }),
     ]);
 
-    if (!medRes.error && medRes.data) setMedications(medRes.data.map(mapMedicationRow));
+    if (!medRes.error && medRes.data) {
+      const remoteMedications = medRes.data.map(mapMedicationRow);
+      setMedications(prev => {
+        // If remote is unexpectedly empty, keep locally cached medications to avoid vanishing data.
+        if (remoteMedications.length === 0 && prev.length > 0) {
+          return prev;
+        }
+
+        // Keep remote truth while preserving any local-only rows that are not yet synced.
+        const byId = new Map<string, Medication>();
+        remoteMedications.forEach(item => byId.set(item.id, item));
+        prev.forEach(item => {
+          if (!byId.has(item.id)) byId.set(item.id, item);
+        });
+        return Array.from(byId.values());
+      });
+    }
     if (!logRes.error && logRes.data) setLogs(logRes.data.map(mapLogRow));
     if (!notifRes.error && notifRes.data) setNotifications(notifRes.data.map(mapNotificationRow));
   };
@@ -571,9 +587,11 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
     setMedications(prev => [...prev, newMedication]);
 
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('medications')
         .insert({
+          id: newMedication.id,
+          created_at: newMedication.createdAt,
           patient_id: med.patientId,
           drug_name: med.drugName,
           display_name: med.displayName ?? null,
@@ -587,15 +605,14 @@ export const MedicineProvider = ({ children }: { children: ReactNode }) => {
           criticality: med.criticality,
           schedule_time: med.scheduleTime,
           frequency: med.frequency,
-        })
-        .select()
-        .single();
+        });
 
-      if (!error && data) {
-        const mapped = mapMedicationRow(data);
-        setMedications(prev => prev.map(item => (item.id === newMedication.id ? mapped : item)));
-        return mapped;
+      if (error) {
+        // Preserve local row so the medicine remains available offline or when write scope is limited.
+        console.error('Failed to persist medication to Supabase:', error.message || 'Unknown error');
       }
+
+      return newMedication;
     }
 
     return newMedication;

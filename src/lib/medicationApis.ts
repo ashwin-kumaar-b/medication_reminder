@@ -114,7 +114,11 @@ export interface MissedDoseRecoveryAdvice {
 
 export interface DrugAllergyProfileInput {
   language?: 'en' | 'es' | 'fr' | 'ta' | 'te' | 'hi';
-  medicines: string[];
+  medicines: Array<{
+    name: string;
+    dosage?: string;
+    frequency?: string;
+  }>;
   gender?: string;
   bloodGroup?: string;
   chronicDiseases?: string[];
@@ -132,6 +136,7 @@ export interface DrugAllergyProfileInsight {
     evidence: string;
   }>;
   recommendations: string[];
+  contextNote?: string;
   source: 'Groq';
 }
 
@@ -376,20 +381,48 @@ const fetchDailyMedLabelPayload = async (drugName: string): Promise<unknown | nu
 };
 
 const fetchFaersReactionSignals = async (drugName: string): Promise<Array<{ reaction: string; count: number }>> => {
-  const terms = getOpenFdaSearchTerms(drugName);
+  const baseTerms = getOpenFdaSearchTerms(drugName);
+  const terms = new Set<string>(baseTerms);
+
+  try {
+    const rxcui = await getRxCui(drugName);
+    if (rxcui) {
+      const related = await fetchRxNormAllRelated(rxcui);
+      const conceptGroups = Array.isArray(related?.allRelatedGroup?.conceptGroup) ? related.allRelatedGroup.conceptGroup : [];
+      const genericGroups = conceptGroups.filter((group: any) => ['IN', 'PIN', 'MIN'].includes(clean(group?.tty)));
+      genericGroups.forEach((group: any) => {
+        const concepts = Array.isArray(group?.conceptProperties) ? group.conceptProperties : [];
+        concepts.forEach((concept: any) => {
+          const name = clean(concept?.name);
+          if (name) terms.add(name);
+        });
+      });
+    }
+  } catch {
+    // Continue with best-effort base terms if RxNorm generic enrichment fails.
+  }
+
   const reactionCounts = new Map<string, number>();
 
-  for (const term of terms) {
+  for (const term of Array.from(terms)) {
     const escaped = term.replace(/"/g, '');
     const query = `patient.drug.medicinalproduct:"${escaped}"`;
     const keyPart = OPENFDA_API_KEY ? `&api_key=${encodeURIComponent(OPENFDA_API_KEY)}` : '';
     const url = `${FAERS_BASE_URL}?search=${encodeURIComponent(query)}&count=${encodeURIComponent('patient.reaction.reactionmeddrapt.exact')}${keyPart}`;
 
+    if (/azithromycin/i.test(drugName) || /azithromycin/i.test(term)) {
+      console.info('[FAERS DEBUG] drug=', drugName, 'term=', term, 'query=', query, 'url=', url);
+    }
+
     try {
       const response = await fetch(url);
+      const rawText = await response.text();
+      if (/azithromycin/i.test(drugName) || /azithromycin/i.test(term)) {
+        console.info('[FAERS DEBUG] status=', response.status, 'term=', term, 'raw=', rawText.slice(0, 1200));
+      }
       if (!response.ok) continue;
 
-      const payload = await response.json();
+      const payload = JSON.parse(rawText);
       const results = Array.isArray(payload?.results) ? payload.results : [];
       results.slice(0, 20).forEach((entry: any) => {
         const reaction = clean(entry?.term || entry?.name);
@@ -398,6 +431,9 @@ const fetchFaersReactionSignals = async (drugName: string): Promise<Array<{ reac
         reactionCounts.set(reaction, (reactionCounts.get(reaction) || 0) + count);
       });
     } catch {
+      if (/azithromycin/i.test(drugName) || /azithromycin/i.test(term)) {
+        console.info('[FAERS DEBUG] request failed for term=', term);
+      }
       continue;
     }
   }
@@ -406,6 +442,231 @@ const fetchFaersReactionSignals = async (drugName: string): Promise<Array<{ reac
     .map(([reaction, count]) => ({ reaction, count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 6);
+};
+
+const OVERDOSE_RELATED_REACTION_PATTERNS = [
+  /overdose/i,
+  /intentional/i,
+  /self[-\s]?harm/i,
+  /suicid/i,
+  /poison/i,
+  /drug abuse/i,
+  /substance abuse/i,
+  /dependence/i,
+  /withdrawal/i,
+  /misuse/i,
+  /toxicity/i,
+];
+
+const isOverdoseRelatedReaction = (reaction: string) => {
+  const normalized = clean(reaction);
+  if (!normalized) return false;
+  return OVERDOSE_RELATED_REACTION_PATTERNS.some(pattern => pattern.test(normalized));
+};
+
+const parseNumericDoseInMg = (dosageText?: string) => {
+  const normalized = clean(dosageText).toLowerCase();
+  if (!normalized) return null;
+
+  const mgMatch = normalized.match(/(\d+(?:\.\d+)?)\s*mg\b/);
+  if (mgMatch) {
+    const value = Number(mgMatch[1]);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const gMatch = normalized.match(/(\d+(?:\.\d+)?)\s*g\b/);
+  if (gMatch) {
+    const value = Number(gMatch[1]);
+    return Number.isFinite(value) ? value * 1000 : null;
+  }
+
+  return null;
+};
+
+const parseAdministrationsPerDay = (frequency?: string) => {
+  const normalized = clean(frequency).toLowerCase();
+  if (!normalized) return 1;
+  if (normalized.includes('thrice') || normalized.includes('three')) return 3;
+  if (normalized.includes('twice') || normalized.includes('two')) return 2;
+  if (normalized.includes('weekly')) return 1 / 7;
+  if (normalized.includes('every') && normalized.includes('hour')) {
+    const everyHourMatch = normalized.match(/every\s*(\d+(?:\.\d+)?)\s*(hour|hours|hr|hrs)/);
+    if (everyHourMatch) {
+      const hours = Number(everyHourMatch[1]);
+      if (Number.isFinite(hours) && hours > 0) return 24 / hours;
+    }
+  }
+  const xPerDayMatch = normalized.match(/(\d+)\s*(x|times?)\s*(a|per)?\s*day/);
+  if (xPerDayMatch) {
+    const count = Number(xPerDayMatch[1]);
+    if (Number.isFinite(count) && count > 0) return count;
+  }
+  return 1;
+};
+
+const parseDailyMedMaxDailyMg = (dosageLines: string[]) => {
+  const patterns = [
+    /do\s+not\s+exceed\s*(\d+(?:\.\d+)?)\s*mg\b/i,
+    /maximum(?:\s+recommended)?(?:\s+daily)?\s+dose(?:\s+is|:)?\s*(\d+(?:\.\d+)?)\s*mg\b/i,
+    /max(?:imum)?\s*(\d+(?:\.\d+)?)\s*mg\s*(?:\/\s*day|per\s*day|in\s*24\s*hours|\/\s*24\s*h)/i,
+  ];
+
+  for (const line of dosageLines) {
+    for (const pattern of patterns) {
+      const match = line.match(pattern);
+      if (!match) continue;
+      const value = Number(match[1]);
+      if (Number.isFinite(value) && value > 0) return value;
+    }
+  }
+
+  return null;
+};
+
+const parseDailyMedPerDoseRangeMg = (dosageLines: string[]) => {
+  for (const line of dosageLines) {
+    const match = line.match(/(\d+(?:\.\d+)?)\s*(?:to|-|–)\s*(\d+(?:\.\d+)?)\s*mg\b/i);
+    if (!match) continue;
+    const min = Number(match[1]);
+    const max = Number(match[2]);
+    if (Number.isFinite(min) && Number.isFinite(max) && min > 0 && max >= min) {
+      return { min, max };
+    }
+  }
+  return null;
+};
+
+const classifyDoseRange = (params: {
+  dosage?: string;
+  frequency?: string;
+  dosageLines: string[];
+}) => {
+  const patientDoseMg = parseNumericDoseInMg(params.dosage);
+  const administrationsPerDay = parseAdministrationsPerDay(params.frequency);
+  const patientDailyDoseMg =
+    patientDoseMg !== null && Number.isFinite(administrationsPerDay) ? patientDoseMg * administrationsPerDay : null;
+  const maxDailyMg = parseDailyMedMaxDailyMg(params.dosageLines);
+  const perDoseRange = parseDailyMedPerDoseRangeMg(params.dosageLines);
+
+  let status: 'within-range' | 'above-range' | 'unknown' = 'unknown';
+  if (patientDailyDoseMg !== null && maxDailyMg !== null) {
+    status = patientDailyDoseMg <= maxDailyMg ? 'within-range' : 'above-range';
+  } else if (patientDoseMg !== null && perDoseRange) {
+    status = patientDoseMg >= perDoseRange.min && patientDoseMg <= perDoseRange.max ? 'within-range' : 'above-range';
+  }
+
+  return {
+    status,
+    patientDoseMg,
+    patientDailyDoseMg,
+    maxDailyMg,
+    perDoseRange,
+  };
+};
+
+const toPercent = (part: number, total: number) => {
+  if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0) return '0.0%';
+  return `${((part / total) * 100).toFixed(1)}%`;
+};
+
+const isDeathReaction = (reaction: string) => /\b(death|fatal|mortality)\b/i.test(clean(reaction));
+
+const getFaersReactionDisplayLabel = (reaction: string) => {
+  const normalized = clean(reaction).toUpperCase();
+  if (normalized === 'PAIN') return 'Inadequate Pain Control';
+  return clean(reaction);
+};
+
+const stripPercentages = (text: string) => clean(text).replace(/\b\d+(?:\.\d+)?%\b/g, '').replace(/\s{2,}/g, ' ').trim();
+
+const stripExactPercentageUnavailableText = (text: string) =>
+  clean(text)
+    .replace(/exact\s+percentage\s+is\s+not\s+available\.?/gi, '')
+    .replace(/percentage\s+is\s+not\s+available\.?/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+const normalizeIneffectiveEvidenceSentence = (text: string) => {
+  const normalized = clean(text);
+  if (!normalized) return normalized;
+
+  const percentage = normalized.match(/(\d+(?:\.\d+)?)%/i)?.[1];
+  const looksTruncated = /involved\s+the\.?$/i.test(normalized) || /reported\s+the\.?$/i.test(normalized);
+  const isIneffectiveText = /(drug ineffective|ineffective|lack of effect|treatment failure)/i.test(normalized);
+
+  if (looksTruncated && percentage && isIneffectiveText) {
+    return `${percentage}% of reported cases reported the drug as ineffective.`;
+  }
+
+  return normalized;
+};
+
+const normalizePainLabelText = (text: string) =>
+  clean(text)
+    .replace(/\bPain\s+relief\b/gi, 'Inadequate Pain Control')
+    .replace(/\bPAIN\b/g, 'Inadequate Pain Control');
+
+const classifyFindingCategory = (finding: { title: string; detail: string; evidence: string }) => {
+  const blob = `${finding.title} ${finding.detail} ${finding.evidence}`.toLowerCase();
+  if (/(overdose|intentional|misuse|poison|drug abuse|substance abuse|dependence|toxicity)/i.test(blob)) return 'overdose';
+  if (/(inadequate pain control|drug ineffective|ineffective|lack of effect|treatment failure|pain persisted|pain not controlled)/i.test(blob)) return 'ineffective';
+  if (/(death|fatal|mortality)/i.test(blob)) return 'death';
+  return 'other';
+};
+
+const isOverdoseAssociatedDependenceFinding = (finding: { title: string; detail: string; evidence: string }) => {
+  const blob = `${finding.title} ${finding.detail} ${finding.evidence}`.toLowerCase();
+  const hasDependenceTerm = /(dependence|addiction|withdrawal|substance use disorder)/i.test(blob);
+  const hasMisuseContext = /(misuse|overdose|abuse|intentional|poison)/i.test(blob);
+  return hasDependenceTerm && hasMisuseContext;
+};
+
+const buildFallbackFindingsFromEvidence = (
+  grounding: Array<{
+    medName: string;
+    warningLines: string[];
+    contraindicationLines: string[];
+    filteredSignals: Array<{ reaction: string; count: number }>;
+    faersSignals: Array<{ reaction: string; count: number }>;
+    totalFaersCount: number;
+  }>,
+) => {
+  const fallbackFindings: DrugAllergyProfileInsight['findings'] = [];
+
+  grounding.forEach(entry => {
+    const selectedSignals = entry.filteredSignals.length > 0 ? entry.filteredSignals : entry.faersSignals;
+    selectedSignals.slice(0, 3).forEach(signal => {
+      const reactionLabel = getFaersReactionDisplayLabel(signal.reaction);
+      const reactionType = isOverdoseRelatedReaction(signal.reaction) ? 'overdose/misuse-associated' : 'non-overdose signal';
+      const evidence = isDeathReaction(signal.reaction)
+        ? `${entry.medName} | FAERS reaction category: ${reactionLabel} | signal_type: ${reactionType} | reported in retrieved FAERS lifetime submissions`
+        : `${entry.medName} | FAERS reaction category: ${reactionLabel} | signal_type: ${reactionType} | reporting share among retrieved FAERS lifetime submissions: ${toPercent(signal.count, entry.totalFaersCount || 0)}`;
+
+      fallbackFindings.push({
+        severity: reactionType === 'overdose/misuse-associated' ? 'low' : 'moderate',
+        title: reactionLabel,
+        detail:
+          reactionType === 'overdose/misuse-associated'
+            ? `${reactionLabel} is mainly reported in misuse or overdose scenarios rather than normal prescribed use.`
+            : `${reactionLabel} has been reported in post-marketing FDA reports and should be monitored clinically when symptoms appear.`,
+        evidence,
+      });
+    });
+
+    if (fallbackFindings.length === 0) {
+      const warningEvidence = [...entry.warningLines, ...entry.contraindicationLines].filter(Boolean);
+      if (warningEvidence.length > 0) {
+        fallbackFindings.push({
+          severity: 'low',
+          title: 'Label-Based Caution',
+          detail: 'DailyMed warning and contraindication text indicates routine caution and monitoring.',
+          evidence: `${entry.medName} | ${warningEvidence[0]}`,
+        });
+      }
+    }
+  });
+
+  return fallbackFindings.slice(0, 6);
 };
 
 export const getMedlinePlusDrugInfoByRxCui = async (rxcui: string): Promise<MedlinePlusDrugInfo | null> => {
@@ -1246,6 +1507,17 @@ export const getDrugAllergyProfileInsight = async (
   };
   const outputLanguage = languageNameByCode[input.language || 'en'] || 'English';
 
+  const normalizedMedicines = input.medicines
+    .map(item => ({
+      name: clean(item.name),
+      dosage: clean(item.dosage),
+      frequency: clean(item.frequency),
+    }))
+    .filter(item => item.name)
+    .slice(0, 6);
+
+  if (normalizedMedicines.length === 0) return null;
+
   const normalizedChronic = (input.chronicDiseases || []).filter(Boolean);
   const normalizedInfections = (input.infectionHistory || []).filter(Boolean);
   const normalizedAllergies = (input.allergies || [])
@@ -1258,52 +1530,136 @@ export const getDrugAllergyProfileInsight = async (
   const normalizedBloodGroup = clean(input.bloodGroup);
 
   const fdaGroundingByMedicine = await Promise.all(
-    input.medicines.slice(0, 6).map(async medName => {
-      const label = await fetchDailyMedLabelPayload(medName);
-      const warningLines = getDailyMedSectionLines(label, ['warnings_and_cautions', 'warningsandcautions', 'warnings', 'boxed_warning', 'boxedwarning'], 2);
+    normalizedMedicines.map(async med => {
+      const label = await fetchDailyMedLabelPayload(med.name);
+      const boxedWarningLines = getDailyMedSectionLines(label, ['boxed_warning', 'boxedwarning'], 2);
+      const warningLines = getDailyMedSectionLines(label, ['warnings_and_cautions', 'warningsandcautions', 'warnings'], 2);
       const contraindicationLines = getDailyMedSectionLines(label, ['contraindications'], 2);
-      const faersSignals = await fetchFaersReactionSignals(medName);
+      const dosageLines = getDailyMedSectionLines(label, ['dosage_and_administration', 'dosageandadministration', 'dosage', 'administration'], 4);
+      const faersSignals = await fetchFaersReactionSignals(med.name);
+      const totalFaersCount = faersSignals.reduce((sum, signal) => sum + signal.count, 0);
+      const overdoseSignals = faersSignals.filter(signal => isOverdoseRelatedReaction(signal.reaction));
+      const nonOverdoseSignals = faersSignals.filter(signal => !isOverdoseRelatedReaction(signal.reaction));
+      const overdoseShare =
+        totalFaersCount > 0
+          ? overdoseSignals.reduce((sum, signal) => sum + signal.count, 0) / totalFaersCount
+          : 0;
+
+      const doseContext = classifyDoseRange({
+        dosage: med.dosage,
+        frequency: med.frequency,
+        dosageLines,
+      });
+
+      const filteredSignals =
+        doseContext.status === 'within-range'
+          ? nonOverdoseSignals
+          : faersSignals;
 
       return {
-        medName,
+        medName: med.name,
+        dosage: med.dosage,
+        frequency: med.frequency,
+        boxedWarningLines,
         warningLines,
         contraindicationLines,
+        dosageLines,
         faersSignals,
+        filteredSignals,
+        totalFaersCount,
+        overdoseShare,
+        doseContext,
       };
     }),
   );
 
+  const hasBoxedWarning = fdaGroundingByMedicine.some(entry => entry.boxedWarningLines.length > 0);
+  const hasWarningsNoBoxed = fdaGroundingByMedicine.some(
+    entry => entry.boxedWarningLines.length === 0 && (entry.warningLines.length > 0 || entry.contraindicationLines.length > 0),
+  );
+  const hasTherapeuticSignals = fdaGroundingByMedicine.some(
+    entry => entry.doseContext.status === 'within-range' && entry.filteredSignals.length > 0,
+  );
+  const faersPrimarilyOverdose = fdaGroundingByMedicine.some(entry => entry.overdoseShare >= 0.6);
+
+  const riskFromRule: DrugAllergyProfileInsight['overallRisk'] =
+    hasBoxedWarning && hasTherapeuticSignals
+      ? 'high'
+      : hasWarningsNoBoxed || faersPrimarilyOverdose
+      ? 'moderate'
+      : hasBoxedWarning
+      ? 'moderate'
+      : 'low';
+
   const fdaEvidenceLines = fdaGroundingByMedicine
     .flatMap(entry => [
+      ...entry.boxedWarningLines.map(line => `${entry.medName} | boxed_warning: ${line}`),
       ...entry.warningLines.map(line => `${entry.medName} | warnings_and_cautions: ${line}`),
       ...entry.contraindicationLines.map(line => `${entry.medName} | contraindications: ${line}`),
     ])
     .slice(0, 16);
 
+  const doseEvidenceLines = fdaGroundingByMedicine
+    .map(entry => {
+      const doseStatusText =
+        entry.doseContext.status === 'within-range'
+          ? 'Patient dose appears within DailyMed therapeutic range.'
+          : entry.doseContext.status === 'above-range'
+          ? 'Patient dose may exceed DailyMed therapeutic range and needs clinician review.'
+          : 'Therapeutic range could not be confirmed from available DailyMed dosage text.';
+
+      const patientDoseText = entry.dosage
+        ? `Recorded dose: ${entry.dosage}${entry.frequency ? `, frequency: ${entry.frequency}` : ''}.`
+        : 'Recorded dose not provided.';
+
+      const referenceText =
+        entry.doseContext.maxDailyMg !== null
+          ? `DailyMed reference: max ${entry.doseContext.maxDailyMg} mg/day.`
+          : entry.doseContext.perDoseRange
+          ? `DailyMed reference: ${entry.doseContext.perDoseRange.min}-${entry.doseContext.perDoseRange.max} mg per dose.`
+          : 'DailyMed reference: explicit numeric therapeutic range not detected.';
+
+      return `${entry.medName} | dose_context: ${patientDoseText} ${referenceText} ${doseStatusText}`;
+    })
+    .slice(0, 12);
+
   const faersEvidenceLines = fdaGroundingByMedicine
     .flatMap(entry =>
-      entry.faersSignals.map(signal => `${entry.medName} | FAERS reaction: ${signal.reaction} (${signal.count} reports)`),
+      (entry.filteredSignals.length > 0 ? entry.filteredSignals : entry.faersSignals).map(signal => {
+        const reactionClass = isOverdoseRelatedReaction(signal.reaction) ? 'overdose/misuse-associated' : 'non-overdose signal';
+        const reactionLabel = getFaersReactionDisplayLabel(signal.reaction);
+        if (isDeathReaction(signal.reaction)) {
+          return `${entry.medName} | FAERS reaction category: ${reactionLabel} | signal_type: ${reactionClass} | reported in retrieved FAERS lifetime submissions`;
+        }
+        const shareText = toPercent(signal.count, entry.totalFaersCount || 0);
+        return `${entry.medName} | FAERS reaction category: ${reactionLabel} | signal_type: ${reactionClass} | reporting share among retrieved FAERS lifetime submissions: ${shareText}`;
+      }),
     )
     .slice(0, 18);
 
   const prompt = [
-    'You are a medication safety explainer focused on allergy and comorbidity-aware checks.',
-    'Use only FDA evidence lines as medical grounding: DailyMed label sections and FAERS adverse-event reaction counts.',
+    'You are a calm medication safety explainer focused on allergy and comorbidity-aware checks.',
+    'Use only FDA evidence lines as medical grounding: DailyMed label sections, dose-context lines, and filtered FAERS reaction categories.',
     'Do not invent adverse effects or contraindications not present in FDA lines.',
-    'Interpret FAERS as reporting signal frequency, not proven causality.',
+    'Interpret FAERS as lifetime spontaneous-reporting signal frequency, not proven causality and not personal risk.',
+    'Never present raw FAERS counts as absolute risk scores.',
+    'Keep language reassuring, practical, and non-alarming for normal prescribed use.',
     'If FDA evidence is unavailable for a medicine, clearly state evidence limitation instead of speculating.',
+    `Overall risk is already pre-classified as ${riskFromRule}. Do not change it.`,
+    'When dose context is within therapeutic range, deprioritize overdose-only reactions.',
     `Write summary, findings[].title, findings[].detail, findings[].evidence, and recommendations in ${outputLanguage}.`,
     'Keep medication names and medical terminology in English.',
     'Explain in simple patient language while staying faithful to FDA evidence text.',
     'Return strict JSON only with this exact shape:',
     '{"overallRisk":"high|moderate|low|none","summary":"...","findings":[{"severity":"high|moderate|low","title":"...","detail":"...","evidence":"..."}],"recommendations":["..."]}',
-    `Current medicines: ${input.medicines.join(', ')}`,
+    `Current medicines: ${normalizedMedicines.map(item => item.name).join(', ')}`,
     `Patient profile: gender=${normalizedGender || 'Not specified'}, blood_group=${normalizedBloodGroup || 'Not specified'}`,
     `Chronic diseases: ${normalizedChronic.join(', ') || 'None'}`,
     `Infection history: ${normalizedInfections.join(', ') || 'None'}`,
     `Allergies: ${normalizedAllergies.map(item => `${item.category}${item.trigger ? `(${item.trigger})` : ''}`).join(', ') || 'None'}`,
     `DailyMed label evidence lines: ${fdaEvidenceLines.length > 0 ? fdaEvidenceLines.join(' | ') : 'No DailyMed warnings_and_cautions/contraindications evidence available for these medicines.'}`,
-    `FDA FAERS evidence lines: ${faersEvidenceLines.length > 0 ? faersEvidenceLines.join(' | ') : 'No FAERS reaction count evidence available for these medicines.'}`,
+    `Dose context evidence lines: ${doseEvidenceLines.length > 0 ? doseEvidenceLines.join(' | ') : 'No usable DailyMed dosage context lines available.'}`,
+    `FDA FAERS evidence lines: ${faersEvidenceLines.length > 0 ? faersEvidenceLines.join(' | ') : 'No FAERS reaction category evidence available for these medicines.'}`,
   ].join('\n');
 
   try {
@@ -1331,10 +1687,7 @@ export const getDrugAllergyProfileInsight = async (
     const parsed = parseGeminiJson(rawText);
     if (!parsed) return null;
 
-    const overallRisk: DrugAllergyProfileInsight['overallRisk'] =
-      parsed.overallRisk === 'high' || parsed.overallRisk === 'moderate' || parsed.overallRisk === 'low' || parsed.overallRisk === 'none'
-        ? parsed.overallRisk
-        : 'none';
+    const overallRisk: DrugAllergyProfileInsight['overallRisk'] = riskFromRule;
 
     const findings = Array.isArray(parsed.findings)
       ? parsed.findings
@@ -1350,15 +1703,100 @@ export const getDrugAllergyProfileInsight = async (
           .slice(0, 6)
       : [];
 
+    const normalizedFindings = (findings.length > 0 ? findings : buildFallbackFindingsFromEvidence(fdaGroundingByMedicine))
+      .map(item => {
+        const category = classifyFindingCategory(item);
+        const title = stripExactPercentageUnavailableText(normalizePainLabelText(item.title));
+        const detail = stripExactPercentageUnavailableText(normalizePainLabelText(item.detail));
+        const evidence = normalizeIneffectiveEvidenceSentence(
+          stripExactPercentageUnavailableText(normalizePainLabelText(item.evidence)),
+        );
+        if (category === 'death') {
+          return {
+            ...item,
+            title: stripPercentages(title),
+            detail: stripPercentages(detail),
+            evidence: stripPercentages(evidence),
+          };
+        }
+        return {
+          ...item,
+          title,
+          detail,
+          evidence,
+        };
+      })
+      .filter(item => item.title || item.detail || item.evidence);
+
+    const hasAnyDeathSignal = fdaGroundingByMedicine.some(entry =>
+      (entry.filteredSignals.length > 0 ? entry.filteredSignals : entry.faersSignals).some(signal => isDeathReaction(signal.reaction)),
+    );
+
+    const shouldSuppressStandaloneDeath = !hasBoxedWarning && hasAnyDeathSignal;
+
+    const misuseDependenceNote = 'Note: Dependence risk is associated with misuse or overdose, not normal prescribed use.';
+
+    let findingsWithoutMisuseDependence = normalizedFindings;
+    if (!hasBoxedWarning) {
+      const hasMisuseDependenceCard = normalizedFindings.some(item => isOverdoseAssociatedDependenceFinding(item));
+      if (hasMisuseDependenceCard) {
+        findingsWithoutMisuseDependence = normalizedFindings.filter(item => !isOverdoseAssociatedDependenceFinding(item));
+      }
+    }
+
+    let filteredAndOrderedFindings = findingsWithoutMisuseDependence
+      .filter(item => !(shouldSuppressStandaloneDeath && classifyFindingCategory(item) === 'death'))
+      .sort((a, b) => {
+        if (hasBoxedWarning) return 0;
+        const priority = (kind: string) => {
+          if (kind === 'overdose') return 0;
+          if (kind === 'ineffective') return 1;
+          if (kind === 'other') return 2;
+          return 3;
+        };
+        return priority(classifyFindingCategory(a)) - priority(classifyFindingCategory(b));
+      })
+      .slice(0, 6);
+
+    if (!hasBoxedWarning && normalizedFindings.some(item => isOverdoseAssociatedDependenceFinding(item))) {
+      const overdoseIndex = filteredAndOrderedFindings.findIndex(item => classifyFindingCategory(item) === 'overdose');
+      if (overdoseIndex >= 0) {
+        const target = filteredAndOrderedFindings[overdoseIndex];
+        if (!target.detail.includes(misuseDependenceNote)) {
+          filteredAndOrderedFindings[overdoseIndex] = {
+            ...target,
+            detail: `${target.detail} ${misuseDependenceNote}`.trim(),
+          };
+        }
+      }
+    }
+
     const recommendations = Array.isArray(parsed.recommendations)
       ? parsed.recommendations.map((item: string) => clean(item)).filter(Boolean).slice(0, 5)
       : [];
 
+    const contextNotes: string[] = [];
+    if (shouldSuppressStandaloneDeath) {
+      contextNotes.push('Serious outcomes including hospitalisation have been reported rarely, typically in patients with pre-existing conditions or complex health situations.');
+    }
+    if (!hasBoxedWarning && normalizedFindings.some(item => isOverdoseAssociatedDependenceFinding(item))) {
+      const hasOverdoseCard = filteredAndOrderedFindings.some(item => classifyFindingCategory(item) === 'overdose');
+      if (!hasOverdoseCard) contextNotes.push(misuseDependenceNote);
+    }
+    const contextNote = contextNotes.length > 0 ? contextNotes.join(' ') : undefined;
+
     return {
       overallRisk,
-      summary: clean(parsed.summary) || 'No major profile-based interaction signal was detected from provided data.',
-      findings,
+      summary:
+        clean(parsed.summary) ||
+        (overallRisk === 'high'
+          ? 'Some higher-priority label-based concerns need clinician review, even when doses are recorded as prescribed.'
+          : overallRisk === 'moderate'
+          ? 'Current evidence suggests caution and routine monitoring, with focus on label warnings and dose context.'
+          : 'Current evidence suggests low risk for normal prescribed use, with routine monitoring advised.'),
+      findings: filteredAndOrderedFindings,
       recommendations,
+      contextNote,
       source: 'Groq',
     };
   } catch {

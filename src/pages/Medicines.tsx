@@ -8,7 +8,7 @@ import { getMedicineDetailsByName } from '@/lib/localMedicineData';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const Medicines = () => {
-  const { medicines, removeMedicine, medications } = useMedicines();
+  const { removeMedicine, medications } = useMedicines();
   const { user, getLinkedPatients } = useAuth();
   const { toast } = useToast();
   const [searchParams] = useSearchParams();
@@ -17,27 +17,81 @@ const Medicines = () => {
   const [selectedPatientId, setSelectedPatientId] = useState<string>(defaultPatientId);
   const [substituteById, setSubstituteById] = useState<Record<string, string[]>>({});
 
+  useEffect(() => {
+    if (user?.role === 'caretaker' && !selectedPatientId && defaultPatientId) {
+      setSelectedPatientId(defaultPatientId);
+    }
+  }, [user?.role, selectedPatientId, defaultPatientId]);
+
   const displayedMedicines = useMemo(() => {
-    if (user?.role === 'patient') return medicines;
-    
-    // For caretakers, filter medicines by the selected patient
-    return medicines.filter((legacyMed) => {
-        // Need to find the underlying Medication object to get the patientId
-        const med = medications.find(m => m.id === legacyMed.id);
-        return med && med.patientId === selectedPatientId;
+    const scoped =
+      user?.role === 'caretaker'
+        ? medications.filter(med => med.patientId === selectedPatientId)
+        : medications;
+
+    const grouped = new Map<
+      string,
+      {
+        id: string;
+        sourceIds: string[];
+        name: string;
+        dosage: string;
+        photoUrl?: string;
+        frequency: 'daily' | 'twice' | 'thrice';
+        timeSlots: string[];
+        foodInstructions: string;
+        isActive: boolean;
+        genericName?: string;
+      }
+    >();
+
+    scoped.forEach(med => {
+      const displayName = med.displayName || med.drugName;
+      const key = [
+        med.patientId,
+        displayName.toLowerCase(),
+        med.dosage.toLowerCase(),
+        med.foodTiming,
+        med.category,
+        med.criticality,
+      ].join('|');
+
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.sourceIds.push(med.id);
+        if (!existing.timeSlots.includes(med.scheduleTime)) {
+          existing.timeSlots.push(med.scheduleTime);
+          existing.timeSlots.sort();
+        }
+        return;
+      }
+
+      grouped.set(key, {
+        id: med.id,
+        sourceIds: [med.id],
+        name: displayName,
+        dosage: med.dosage,
+        photoUrl: med.photoUrl,
+        frequency: med.frequency === 'weekly' ? 'daily' : med.frequency,
+        timeSlots: [med.scheduleTime],
+        foodInstructions: med.foodTiming === 'after-food' ? 'Take after food' : 'Take before food',
+        isActive: true,
+        genericName: med.genericName || med.drugName,
+      });
     });
-  }, [medicines, medications, user?.role, selectedPatientId]);
+
+    return Array.from(grouped.values());
+  }, [medications, user?.role, selectedPatientId]);
 
   useEffect(() => {
     let active = true;
 
     const loadSubstitutes = async () => {
       const pairs = await Promise.all(
-        displayedMedicines.map(async legacyMed => {
-          const sourceMedication = medications.find(item => item.id === legacyMed.id);
-          const lookupName = sourceMedication?.genericName || sourceMedication?.drugName || legacyMed.name;
+        displayedMedicines.map(async groupedMed => {
+          const lookupName = groupedMed.genericName || groupedMed.name;
           const details = await getMedicineDetailsByName(lookupName);
-          return [legacyMed.id, details?.substitutes?.slice(0, 3) || []] as const;
+          return [groupedMed.id, details?.substitutes?.slice(0, 3) || []] as const;
         }),
       );
 
@@ -53,8 +107,8 @@ const Medicines = () => {
     };
   }, [displayedMedicines, medications]);
 
-  const handleDelete = (id: string, name: string) => {
-    removeMedicine(id);
+  const handleDelete = async (sourceIds: string[], name: string) => {
+    await Promise.all(sourceIds.map(id => removeMedicine(id)));
     toast({ title: 'Removed', description: `${name} has been removed.` });
   };
 
@@ -97,8 +151,7 @@ const Medicines = () => {
           {displayedMedicines.map((med, i) => (
             <div key={med.id} className="animate-fade-in rounded-xl border border-border bg-card p-5 shadow-card transition-all hover:shadow-elevated" style={{ animationDelay: `${i * 0.05}s` }}>
               {(() => {
-                const sourceMedication = medications.find(item => item.id === med.id);
-                const genericName = sourceMedication?.genericName || sourceMedication?.drugName;
+                const genericName = med.genericName;
                 const substitutes = substituteById[med.id] || [];
 
                 return (
@@ -137,7 +190,7 @@ const Medicines = () => {
                 <Link to={`/edit-medicine/${med.id}`} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-foreground hover:bg-muted">
                   <Pencil className="h-3.5 w-3.5" /> Edit
                 </Link>
-                <button onClick={() => handleDelete(med.id, med.name)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10">
+                <button onClick={() => void handleDelete(med.sourceIds, med.name)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10">
                   <Trash2 className="h-3.5 w-3.5" /> Remove
                 </button>
               </div>

@@ -7,6 +7,14 @@ import { useToast } from '@/hooks/use-toast';
 import { useAppSettings } from '@/features/settings/SettingsContext';
 import { getMissedDoseSeverityInsight, MissedDoseSeverityInsight } from '@/lib/medicationApis';
 
+const getShortMedicineName = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return 'Medicine';
+  const bracketMatch = trimmed.match(/\[([^\]]+)\]/);
+  if (bracketMatch?.[1]) return bracketMatch[1].trim();
+  return trimmed.split(' ')[0];
+};
+
 const Dashboard = () => {
   const { user, createPatientForCaretaker, getLinkedPatients } = useAuth();
   const { settings, t } = useAppSettings();
@@ -99,11 +107,42 @@ const Dashboard = () => {
   const rangeLabel = statsRange === 'daily' ? t('common.today') : t('common.thisWeek');
 
   const cards = [
-    { label: t('dashboard.activeMedicines'), value: activeMeds.length, icon: Pill, color: 'text-primary bg-accent' },
+    { label: t('dashboard.activeMedicines'), value: activeMeds.length, icon: Pill, color: 'text-[#1D9E75] bg-[#1D9E75]/10' },
     { label: `${t('dashboard.taken')} ${rangeLabel}`, value: takenCount, icon: Clock, color: 'text-success bg-success/10' },
     { label: `${t('dashboard.missed')} ${rangeLabel}`, value: missedCount, icon: XCircle, color: 'text-destructive bg-destructive/10' },
     { label: t('dashboard.totalMedicines'), value: medicines.length, icon: AlertTriangle, color: 'text-warning bg-warning/10' },
   ];
+
+  const timelineItems = useMemo(() => {
+    if (!patientView) return [] as Array<{
+      id: string;
+      shortName: string;
+      fullName: string;
+      dose: string;
+      time: string;
+      status: 'upcoming' | 'taken' | 'missed';
+    }>;
+
+    return patientView.today
+      .map(item => {
+        const status =
+          item.status === 'taken'
+            ? 'taken'
+            : item.status === 'missed' || item.status === 'skipped'
+            ? 'missed'
+            : 'upcoming';
+
+        return {
+          id: item.medication.id,
+          shortName: getShortMedicineName(item.medication.displayName || item.medication.drugName),
+          fullName: item.medication.displayName || item.medication.drugName,
+          dose: item.medication.dosage,
+          time: item.medication.scheduleTime,
+          status,
+        };
+      })
+      .sort((a, b) => (a.time > b.time ? 1 : -1));
+  }, [patientView]);
 
   const actions = [
     { to: '/add-medicine', label: t('actions.addMedicine'), icon: Plus, desc: t('actions.addMedicineDesc') },
@@ -656,16 +695,14 @@ const Dashboard = () => {
       </div>
       <div key={statsRange} className="mb-8 grid animate-fade-in gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map(({ label, value, icon: Icon, color }, i) => (
-          <div key={label} className="animate-fade-in rounded-xl border border-border bg-card p-5 shadow-card" style={{ animationDelay: `${i * 0.1}s` }}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">{label}</p>
-                <p className="mt-1 text-3xl font-bold text-foreground">{value}</p>
-              </div>
-              <div className={`rounded-lg p-2.5 ${color}`}>
+          <div key={label} className="animate-fade-in rounded-2xl border border-border/80 bg-card p-5 shadow-card" style={{ animationDelay: `${i * 0.1}s` }}>
+            <div className="flex items-start justify-between">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+              <div className={`rounded-xl p-2 ${color}`}>
                 <Icon className="h-5 w-5" />
               </div>
             </div>
+            <p className="mt-4 text-[28px] font-bold leading-none text-foreground">{value}</p>
           </div>
         ))}
       </div>
@@ -728,7 +765,7 @@ const Dashboard = () => {
       <section className="mb-8 rounded-xl border border-border bg-card p-5 shadow-card">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">
-            {nextDoseGroup?.items.length && nextDoseGroup.items.length > 1 ? t('dashboard.nextMedicinePlural') : t('dashboard.nextMedicineSingle')}
+            {timelineItems.length > 1 ? t('dashboard.nextMedicinePlural') : t('dashboard.nextMedicineSingle')}
           </h2>
           <div className="flex items-center gap-2">
             {nextDoseGroup && (
@@ -748,49 +785,65 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {!nextDoseGroup ? (
+        {!timelineItems.length ? (
           <p className="text-sm text-muted-foreground">{t('dashboard.noPending')}</p>
         ) : (
           <>
             <p className="mb-4 text-sm text-muted-foreground">
-              {nextDoseGroup.isOverdue
+              {nextDoseGroup?.isOverdue
                 ? t('dashboard.dueNow')
-                : `${t('dashboard.upcomingWindow')} ${nextDoseGroup.minutesUntil} minute(s).`}
+                : nextDoseGroup
+                ? `${t('dashboard.upcomingWindow')} ${nextDoseGroup.minutesUntil} minute(s).`
+                : t('dashboard.overviewToday')}
             </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {nextDoseGroup.items.map(item => (
-                <div key={item.medication.id} className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="mb-2 flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      {item.medication.photoUrl ? (
-                        <img
-                          src={item.medication.photoUrl}
-                          alt={item.medication.drugName}
-                          className="h-14 w-14 rounded-md border border-border object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-14 w-14 items-center justify-center rounded-md border border-border bg-accent text-accent-foreground">
-                          <Pill className="h-5 w-5" />
-                        </div>
-                      )}
-                      <p className="font-semibold text-foreground">{item.medication.drugName}</p>
+            <div className="relative space-y-3 pl-2">
+              <div className="absolute bottom-0 left-[76px] top-0 w-px bg-border" />
+              {timelineItems.map(item => {
+                const statusClass =
+                  item.status === 'upcoming'
+                    ? {
+                        dot: 'bg-[#1D9E75]',
+                        block: 'border-[#1D9E75]/30 bg-[#1D9E75]/[0.06]',
+                        badge: 'text-[#1D9E75] bg-[#1D9E75]/10',
+                      }
+                    : item.status === 'taken'
+                    ? {
+                        dot: 'bg-muted-foreground',
+                        block: 'border-border bg-muted/30',
+                        badge: 'text-muted-foreground bg-muted',
+                      }
+                    : {
+                        dot: 'bg-destructive',
+                        block: 'border-destructive/30 bg-destructive/[0.06]',
+                        badge: 'text-destructive bg-destructive/10',
+                      };
+
+                return (
+                  <div key={`${item.id}-${item.time}`} className="grid grid-cols-[64px_16px_minmax(0,1fr)] items-start gap-2">
+                    <p className="pt-2 text-sm font-semibold text-foreground">{item.time}</p>
+                    <div className="flex justify-center pt-3">
+                      <span className={`h-3.5 w-3.5 rounded-full border-2 border-card ${statusClass.dot}`} />
                     </div>
-                    <span className="text-xs font-medium uppercase text-muted-foreground">{item.medication.criticality}</span>
+                    <div className={`rounded-xl border p-3 ${statusClass.block}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-foreground">{item.shortName}</p>
+                          <p className="text-sm text-muted-foreground">{item.dose}</p>
+                        </div>
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize ${statusClass.badge}`}>{item.status}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleTakeFromCard(item.id)}
+                        disabled={item.status === 'taken'}
+                        className="mt-3 min-h-11 rounded-lg bg-[#1D9E75] px-3 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:bg-muted-foreground/50"
+                      >
+                        {item.status === 'taken' ? 'Taken' : 'Mark Taken'}
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-sm text-muted-foreground">{item.medication.dosage}</p>
-                  <p className="text-xs text-muted-foreground">{t('dashboard.category')}: {item.medication.category}</p>
-                  <p className="text-xs text-muted-foreground">{t('dashboard.scheduledAt')}: {item.medication.scheduleTime}</p>
-                  {nextDoseGroup.isOverdue && (
-                    <button
-                      type="button"
-                      onClick={() => void handleTakeFromCard(item.medication.id)}
-                      className="mt-3 rounded-md bg-success px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
-                    >
-                      {t('dashboard.tookMedicine')}
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
