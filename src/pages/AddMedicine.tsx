@@ -131,10 +131,23 @@ const AddMedicine = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const linkedPatients = useMemo(() => getLinkedPatients(user?.id), [getLinkedPatients, user?.id]);
-  const defaultPatientId = user?.role === 'patient' ? user.id : (searchParams.get('patientId') || (linkedPatients.length > 0 ? linkedPatients[0].id : null));
+  const requestedPatient = searchParams.get('patientId');
+  const matchedLinkedPatient = linkedPatients.find(
+    patient => patient.id === requestedPatient || patient.patientId === requestedPatient,
+  );
+  const defaultPatientId =
+    user?.role === 'patient'
+      ? user.id
+      : matchedLinkedPatient?.id || (linkedPatients.length > 0 ? linkedPatients[0].id : null);
 
   const [step, setStep] = useState<WizardStep>(1);
   const [formPatientId, setFormPatientId] = useState<string | null>(defaultPatientId);
+
+  useEffect(() => {
+    if (!formPatientId && defaultPatientId) {
+      setFormPatientId(defaultPatientId);
+    }
+  }, [defaultPatientId, formPatientId]);
 
   const [loading, setLoading] = useState(false);
   const [suggesting, setSuggesting] = useState(false);

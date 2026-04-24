@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import { GitCompareArrows, Loader2, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { GitCompareArrows, Loader2, AlertTriangle, CheckCircle, XCircle, ShieldAlert, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useMedicines } from '@/contexts/MedicineContext';
 import {
-  getDdinterInteractions,
   getDrugAllergyProfileInsight,
   getGeminiMedicalAdvice,
-  getOpenFdaSafety,
   getRxCui,
   getRxNavInteractions,
   parseInputList,
@@ -20,18 +18,56 @@ interface InteractionResult {
   severity: 'high' | 'moderate' | 'low' | 'none';
   description: string;
   drugs: string[];
-  source?: 'RxNav' | 'DailyMed' | 'Gemini' | 'DDInter' | 'Groq';
+  source?: 'RxNav' | 'DailyMed' | 'Gemini' | 'DDInter';
 }
 
-const severityConfig = {
-  high: { icon: XCircle, label: 'High Risk', className: 'border-destructive/30 bg-destructive/5 text-destructive' },
-  moderate: { icon: AlertTriangle, label: 'Moderate Risk', className: 'border-warning/30 bg-warning/5 text-warning' },
-  low: { icon: AlertTriangle, label: 'Low Risk', className: 'border-primary/30 bg-primary/5 text-primary' },
-  none: { icon: CheckCircle, label: 'No Interaction', className: 'border-success/30 bg-success/5 text-success' },
+const getShortMedicineName = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return 'Medicine';
+  const bracketMatch = trimmed.match(/\[([^\]]+)\]/);
+  if (bracketMatch?.[1]) return bracketMatch[1].trim();
+
+  const tokens = trimmed
+    .replace(/\([^)]*\)/g, ' ')
+    .split(/\s+/)
+    .map(token => token.replace(/[^A-Za-z]/g, ''))
+    .filter(Boolean);
+
+  return (tokens[0] || trimmed).replace(/^./, c => c.toUpperCase());
 };
 
+const normalizeSeverity = (severity: InteractionResult['severity']) => {
+  if (severity === 'high') return 'high';
+  if (severity === 'none') return 'none';
+  return 'moderate';
+};
+
+const severityRowConfig = {
+  high: {
+    icon: ShieldAlert,
+    iconClass: 'text-destructive',
+    badge: 'Major',
+    badgeClass: 'bg-destructive/10 text-destructive border-destructive/30',
+    container: 'border-destructive/25 bg-destructive/[0.03]',
+  },
+  moderate: {
+    icon: AlertTriangle,
+    iconClass: 'text-warning',
+    badge: 'Moderate',
+    badgeClass: 'bg-warning/15 text-warning border-warning/30',
+    container: 'border-warning/25 bg-warning/[0.03]',
+  },
+  none: {
+    icon: CheckCircle,
+    iconClass: 'text-[#1D9E75]',
+    badge: 'No interaction',
+    badgeClass: 'bg-[#1D9E75]/10 text-[#1D9E75] border-[#1D9E75]/30',
+    container: 'border-[#1D9E75]/20 bg-[#1D9E75]/[0.03]',
+  },
+} as const;
+
 const InteractionChecker = () => {
-  const { medicines } = useMedicines();
+  const { medicines, medications } = useMedicines();
   const { user } = useAuth();
   const [drug1, setDrug1] = useState('');
   const [drug2, setDrug2] = useState('');
@@ -39,24 +75,68 @@ const InteractionChecker = () => {
   const [symptoms, setSymptoms] = useState('');
   const [loading, setLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
-  const [profileInsight, setProfileInsight] = useState<DrugAllergyProfileInsight | null>(null);
+  const [profileInsights, setProfileInsights] = useState<Array<{ medicineName: string; insight: DrugAllergyProfileInsight }>>([]);
   const [localSideEffects, setLocalSideEffects] = useState<Array<{ medicine: string; effects: string[] }>>([]);
   const [results, setResults] = useState<InteractionResult[]>([]);
   const [checked, setChecked] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
   const { t, settings } = useAppSettings();
 
-  const activeMedicineNames = useMemo(() => {
-    const unique = new Map<string, string>();
+  const activeMedicineProfiles = useMemo(() => {
+    const merged = new Map<string, { name: string; dosage?: string; frequency?: string }>();
+
     medicines
       .filter(med => med.isActive)
       .forEach(med => {
         const normalized = med.name.trim().toLowerCase();
-        if (!normalized || unique.has(normalized)) return;
-        unique.set(normalized, med.name.trim());
+        if (!normalized || merged.has(normalized)) return;
+        merged.set(normalized, {
+          name: med.name.trim(),
+          dosage: med.dosage,
+          frequency: med.frequency,
+        });
       });
-    return Array.from(unique.values());
-  }, [medicines]);
+
+    medications.forEach(med => {
+      const resolvedName = (med.displayName || med.drugName || '').trim();
+      const normalized = resolvedName.toLowerCase();
+      if (!normalized || merged.has(normalized)) return;
+      merged.set(normalized, {
+        name: resolvedName,
+        dosage: med.dosage,
+        frequency: med.frequency,
+      });
+    });
+
+    return Array.from(merged.values());
+  }, [medicines, medications]);
+
+  const activeMedicineNames = useMemo(() => activeMedicineProfiles.map(item => item.name), [activeMedicineProfiles]);
+
+  const groupedInteractionResults = useMemo(() => {
+    const normalized = results.map((row, index) => {
+      const severity = normalizeSeverity(row.severity);
+      const shortDrugA = getShortMedicineName(row.drugs[0] || 'Medicine A');
+      const shortDrugB = getShortMedicineName(row.drugs[1] || 'Medicine B');
+      const summary = `${row.description.replace(/\s+/g, ' ').trim()} - Source: ${row.source === 'RxNav' ? 'NLM RxNav' : row.source || 'RxNav'}`;
+      return {
+        key: `${row.drugs.join('-')}-${index}`,
+        severity,
+        shortDrugA,
+        shortDrugB,
+        fullDrugA: row.drugs[0] || 'Unknown medicine',
+        fullDrugB: row.drugs[1] || 'Unknown medicine',
+        summary,
+        fullDescription: row.description,
+        source: row.source === 'RxNav' ? 'NLM RxNav' : row.source || 'RxNav',
+      };
+    });
+
+    const interactionsDetected = normalized.filter(item => item.severity !== 'none');
+    const noInteractions = normalized.filter(item => item.severity === 'none');
+    return { interactionsDetected, noInteractions };
+  }, [results]);
 
   const buildPairs = (drugs: string[]) => {
     const pairs: Array<[string, string]> = [];
@@ -68,53 +148,57 @@ const InteractionChecker = () => {
     return pairs;
   };
 
-  const checkPair = async (leftDrug: string, rightDrug: string): Promise<InteractionResult[]> => {
+  const checkPair = useCallback(async (leftDrug: string, rightDrug: string): Promise<InteractionResult[]> => {
     const supplementsList = parseInputList(supplements);
     const symptomList = parseInputList(symptoms);
-    const [rxcui1, rxcui2, ddinterItems, openFdaA, openFdaB] = await Promise.all([
+    const [rxcui1, rxcui2] = await Promise.all([
       getRxCui(leftDrug),
       getRxCui(rightDrug),
-      getDdinterInteractions(leftDrug, rightDrug),
-      getOpenFdaSafety(leftDrug),
-      getOpenFdaSafety(rightDrug),
     ]);
 
-    const interactions: InteractionResult[] = [];
-    const rxNavItems = rxcui1 && rxcui2 ? await getRxNavInteractions(rxcui1, rxcui2) : [];
-    rxNavItems.forEach(item => {
-      interactions.push({ ...item, drugs: [leftDrug, rightDrug], source: 'RxNav' });
-    });
+    if (!rxcui1 || !rxcui2) {
+      return [
+        {
+          severity: 'moderate',
+          description: `Could not fully resolve RxNorm IDs for ${leftDrug} and ${rightDrug}. RxNav coverage is limited; verify spellings and cross-check with a pharmacist.`,
+          drugs: [leftDrug, rightDrug],
+          source: 'RxNav',
+        },
+      ];
+    }
 
-    ddinterItems.forEach(item => {
-      interactions.push({ ...item, drugs: [leftDrug, rightDrug], source: 'DDInter' });
-    });
+    const rxNavItems = await getRxNavInteractions(rxcui1, rxcui2);
+    if (rxNavItems.length === 0) {
+      return [
+        {
+          severity: 'none',
+          description: `No known interaction found between ${leftDrug} and ${rightDrug}.`,
+          drugs: [leftDrug, rightDrug],
+          source: 'RxNav',
+        },
+      ];
+    }
 
-    const openFdaWarnings = [
-      ...(openFdaA?.warnings || []),
-      ...(openFdaA?.contraindications || []),
-      ...(openFdaB?.warnings || []),
-      ...(openFdaB?.contraindications || []),
-    ]
-      .filter(Boolean)
-      .slice(0, 2);
+    const severityRank: Record<Exclude<InteractionResult['severity'], 'none'>, number> = {
+      high: 3,
+      moderate: 2,
+      low: 1,
+    };
+    const topSeverity = rxNavItems.reduce<'high' | 'moderate' | 'low'>(
+      (current, item) => (severityRank[item.severity] > severityRank[current] ? item.severity : current),
+      'low',
+    );
 
-    openFdaWarnings.forEach(warning => {
-      interactions.push({
-        severity: warning.toLowerCase().includes('contraindicated') ? 'high' : 'moderate',
-        description: warning,
-        drugs: [leftDrug, rightDrug],
-        source: 'DailyMed',
-      });
-    });
+    const rxNavDescriptions = rxNavItems.map(item => item.description).filter(Boolean);
+    const baseDescription = rxNavDescriptions.slice(0, 2).join(' ');
 
     const apiEvidence = [
-      `RxNorm lookup ${leftDrug}: ${rxcui1 || 'not found'}`,
-      `RxNorm lookup ${rightDrug}: ${rxcui2 || 'not found'}`,
-      ...(rxNavItems.length > 0 ? rxNavItems.map(item => `RxNav: ${item.description}`) : ['RxNav: no interaction records found or RxCUI unavailable.']),
-      ...(ddinterItems.length > 0 ? ddinterItems.map(item => `DDInter: ${item.description}`) : ['DDInter: no interaction records returned.']),
-      ...(openFdaWarnings.length > 0 ? openFdaWarnings.map(warning => `DailyMed: ${warning}`) : ['DailyMed: no warning or contraindication text returned.']),
-    ].slice(0, 12);
+      `RxNorm lookup ${leftDrug}: ${rxcui1}`,
+      `RxNorm lookup ${rightDrug}: ${rxcui2}`,
+      ...rxNavItems.map(item => `RxNav: ${item.description}`),
+    ].slice(0, 10);
 
+    let description = baseDescription;
     const geminiAdvice = await getGeminiMedicalAdvice({
       context: 'drug-interaction',
       drugA: leftDrug,
@@ -124,28 +208,20 @@ const InteractionChecker = () => {
       evidence: apiEvidence,
     });
 
-    if (geminiAdvice) {
-      interactions.unshift({
-        severity: geminiAdvice.severity === 'safe' || geminiAdvice.severity === 'none' ? 'none' : geminiAdvice.severity,
-        description: `${geminiAdvice.summary} ${geminiAdvice.explanation}`.trim(),
-        drugs: [leftDrug, rightDrug],
-        source: geminiAdvice.source,
-      });
+    if (geminiAdvice && baseDescription) {
+      const rewritten = `${geminiAdvice.summary} ${geminiAdvice.explanation}`.trim();
+      if (rewritten) description = rewritten;
     }
 
-    if (interactions.length === 0) {
-      interactions.push({
-        severity: !rxcui1 || !rxcui2 ? 'moderate' : 'none',
-        description: !rxcui1 || !rxcui2
-          ? `Could not fully resolve RxNorm IDs for ${leftDrug} and ${rightDrug}. RxNav coverage is limited; verify spellings and cross-check with a pharmacist.`
-          : `No known interactions found between ${leftDrug} and ${rightDrug}.`,
+    return [
+      {
+        severity: topSeverity,
+        description: description || baseDescription || 'Interaction details available from NLM RxNav.',
         drugs: [leftDrug, rightDrug],
         source: 'RxNav',
-      });
-    }
-
-    return interactions;
-  };
+      },
+    ];
+  }, [supplements, symptoms]);
 
   const handleCheckMyMedicines = async () => {
     if (activeMedicineNames.length < 2) {
@@ -176,14 +252,50 @@ const InteractionChecker = () => {
   };
 
   useEffect(() => {
-    if (activeMedicineNames.length >= 2) {
-      void handleCheckMyMedicines();
-      return;
-    }
+    let active = true;
 
-    setResults([]);
-    setChecked(false);
-  }, [activeMedicineNames]);
+    const runAutoInteractionCheck = async () => {
+      if (activeMedicineNames.length < 2) {
+        if (!active) return;
+        setResults([]);
+        setChecked(false);
+        return;
+      }
+
+      setLoading(true);
+      setResults([]);
+      setChecked(false);
+
+      try {
+        const pairs = buildPairs(activeMedicineNames);
+        const interactions: InteractionResult[] = [];
+
+        for (const [leftDrug, rightDrug] of pairs) {
+          const pairResults = await checkPair(leftDrug, rightDrug);
+          interactions.push(...pairResults);
+        }
+
+        if (!active) return;
+        setResults(interactions);
+        setChecked(true);
+      } catch {
+        if (!active) return;
+        toast({ title: 'Error', description: 'Failed to auto-check medicine interactions. Try again.', variant: 'destructive' });
+      }
+
+      if (active) setLoading(false);
+    };
+
+    void runAutoInteractionCheck();
+
+    return () => {
+      active = false;
+    };
+  }, [activeMedicineNames, checkPair, toast]);
+
+  useEffect(() => {
+    setExpandedRows({});
+  }, [results]);
 
   useEffect(() => {
     let active = true;
@@ -228,25 +340,32 @@ const InteractionChecker = () => {
   };
 
   const handleAnalyzeProfileRisk = async () => {
-    if (activeMedicineNames.length === 0) {
+    if (activeMedicineProfiles.length === 0) {
       toast({ title: 'No active medicines', description: 'Add active medicines to run drug-allergy profile analysis.', variant: 'destructive' });
       return;
     }
 
     setProfileLoading(true);
-    const insight = await getDrugAllergyProfileInsight({
-      language: settings.language,
-      medicines: activeMedicineNames,
-      gender: user?.gender ? `${user.gender}${user?.genderOther ? ` (${user.genderOther})` : ''}` : undefined,
-      bloodGroup: user?.bloodGroup,
-      chronicDiseases: user?.chronicDiseases,
-      infectionHistory: user?.infectionHistory,
-      allergies: user?.allergies,
-    });
-    setProfileInsight(insight);
+    const insightsByMedicine = await Promise.all(
+      activeMedicineProfiles.map(async medicine => {
+        const insight = await getDrugAllergyProfileInsight({
+          language: settings.language,
+          medicines: [medicine],
+          gender: user?.gender ? `${user.gender}${user?.genderOther ? ` (${user.genderOther})` : ''}` : undefined,
+          bloodGroup: user?.bloodGroup,
+          chronicDiseases: user?.chronicDiseases,
+          infectionHistory: user?.infectionHistory,
+          allergies: user?.allergies,
+        });
+
+        return insight ? { medicineName: medicine.name, insight } : null;
+      }),
+    );
+
+    setProfileInsights(insightsByMedicine.filter((item): item is { medicineName: string; insight: DrugAllergyProfileInsight } => !!item));
     setProfileLoading(false);
 
-    if (!insight) {
+    if (insightsByMedicine.every(item => !item)) {
       toast({ title: 'Profile analysis unavailable', description: 'Could not generate profile interaction analysis right now.', variant: 'destructive' });
     }
   };
@@ -293,43 +412,143 @@ const InteractionChecker = () => {
           <p className="mt-3 text-xs text-muted-foreground">At least two active medicines are needed for interaction checks.</p>
         )}
 
-        {profileInsight && (
+        {checked && (
+          <div className="mt-4 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Auto interaction pair results</p>
+            {groupedInteractionResults.interactionsDetected.length > 0 && (
+              <>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Interactions Detected</p>
+                <div className="space-y-2">
+                  {groupedInteractionResults.interactionsDetected.map(item => {
+                    const cfg = severityRowConfig[item.severity];
+                    const Icon = cfg.icon;
+                    const open = !!expandedRows[item.key];
+                    return (
+                      <div key={item.key} className={`rounded-xl border ${cfg.container}`}>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedRows(prev => ({ ...prev, [item.key]: !open }))}
+                          className="flex min-h-11 w-full items-start gap-3 p-3 text-left"
+                        >
+                          <Icon className={`mt-1 h-5 w-5 shrink-0 ${cfg.iconClass}`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                              <span className="truncate">{item.shortDrugA}</span>
+                              <span className="text-muted-foreground">+</span>
+                              <span className="truncate">{item.shortDrugB}</span>
+                            </div>
+                            <p className="mt-1 truncate text-xs text-muted-foreground">{item.summary}</p>
+                          </div>
+                          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${cfg.badgeClass}`}>{cfg.badge}</span>
+                          <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+                        </button>
+                        {open && (
+                          <div className="border-t border-border/60 px-3 pb-3 pt-2 text-xs text-muted-foreground">
+                            <p className="font-medium text-foreground">{item.fullDrugA} + {item.fullDrugB}</p>
+                            <p className="mt-1 leading-relaxed">{item.fullDescription}</p>
+                            <p className="mt-1">Source: {item.source}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {groupedInteractionResults.noInteractions.length > 0 && (
+              <>
+                {groupedInteractionResults.interactionsDetected.length > 0 && <div className="my-1 h-px w-full bg-border" />}
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">No Interactions Found</p>
+                <div className="space-y-2">
+                  {groupedInteractionResults.noInteractions.map(item => {
+                    const cfg = severityRowConfig.none;
+                    const Icon = cfg.icon;
+                    const open = !!expandedRows[item.key];
+                    return (
+                      <div key={item.key} className={`rounded-xl border ${cfg.container}`}>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedRows(prev => ({ ...prev, [item.key]: !open }))}
+                          className="flex min-h-11 w-full items-start gap-3 p-3 text-left"
+                        >
+                          <Icon className={`mt-1 h-5 w-5 shrink-0 ${cfg.iconClass}`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                              <span className="truncate">{item.shortDrugA}</span>
+                              <span className="text-muted-foreground">+</span>
+                              <span className="truncate">{item.shortDrugB}</span>
+                            </div>
+                            <p className="mt-1 truncate text-xs text-muted-foreground">{item.summary}</p>
+                          </div>
+                          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${cfg.badgeClass}`}>{cfg.badge}</span>
+                          <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+                        </button>
+                        {open && (
+                          <div className="border-t border-border/60 px-3 pb-3 pt-2 text-xs text-muted-foreground">
+                            <p className="font-medium text-foreground">{item.fullDrugA} + {item.fullDrugB}</p>
+                            <p className="mt-1 leading-relaxed">{item.fullDescription}</p>
+                            <p className="mt-1">Source: {item.source}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {profileInsights.length > 0 && (
           <div className="mt-4 rounded-xl border border-warning/30 bg-warning/5 p-4">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-foreground">Drug-Allergy & Profile Interaction Insight</h3>
-              <span
-                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase ${
-                  profileInsight.overallRisk === 'high'
-                    ? 'bg-destructive/15 text-destructive'
-                    : profileInsight.overallRisk === 'moderate'
-                    ? 'bg-warning/20 text-warning'
-                    : profileInsight.overallRisk === 'low'
-                    ? 'bg-primary/15 text-primary'
-                    : 'bg-success/15 text-success'
-                }`}
-              >
-                {profileInsight.overallRisk}
-              </span>
+            <h3 className="mb-2 text-sm font-semibold text-foreground">Drug-Allergy & Profile Interaction Insight</h3>
+            <div className="space-y-2">
+              {profileInsights.map((entry, insightIndex) => (
+                <details key={`${entry.medicineName}-${insightIndex}`} className="rounded-md border border-border bg-card p-3" open={insightIndex === 0}>
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-foreground">{entry.medicineName}</span>
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase ${
+                        entry.insight.overallRisk === 'high'
+                          ? 'bg-destructive/15 text-destructive'
+                          : entry.insight.overallRisk === 'moderate'
+                          ? 'bg-warning/20 text-warning'
+                          : entry.insight.overallRisk === 'low'
+                          ? 'bg-primary/15 text-primary'
+                          : 'bg-success/15 text-success'
+                      }`}
+                    >
+                      {entry.insight.overallRisk}
+                    </span>
+                  </summary>
+
+                  <p className="mt-2 text-sm text-foreground">{entry.insight.summary}</p>
+                  {entry.insight.findings.length > 0 && (
+                    <div className="mt-2 space-y-2">
+                      {entry.insight.findings.map((finding, findingIndex) => (
+                        <div key={`${finding.title}-${findingIndex}`} className="rounded-md border border-border bg-background p-3">
+                          <p className="text-sm font-semibold text-foreground">{finding.title}</p>
+                          <p className="text-sm text-muted-foreground">{finding.detail}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Evidence: {finding.evidence}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {entry.insight.recommendations.length > 0 && (
+                    <ul className="mt-3 list-disc pl-5 text-sm text-muted-foreground">
+                      {entry.insight.recommendations.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {entry.insight.contextNote && (
+                    <p className="mt-3 text-xs text-muted-foreground">{entry.insight.contextNote}</p>
+                  )}
+                  <p className="mt-2 text-xs text-muted-foreground">Source: {entry.insight.source}</p>
+                </details>
+              ))}
             </div>
-            <p className="mb-2 text-sm text-foreground">{profileInsight.summary}</p>
-            {profileInsight.findings.length > 0 && (
-              <div className="space-y-2">
-                {profileInsight.findings.map((finding, index) => (
-                  <div key={`${finding.title}-${index}`} className="rounded-md border border-border bg-card p-3">
-                    <p className="text-sm font-semibold text-foreground">{finding.title}</p>
-                    <p className="text-sm text-muted-foreground">{finding.detail}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Evidence: {finding.evidence}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-            {profileInsight.recommendations.length > 0 && (
-              <ul className="mt-3 list-disc pl-5 text-sm text-muted-foreground">
-                {profileInsight.recommendations.map((item, index) => (
-                  <li key={`${item}-${index}`}>{item}</li>
-                ))}
-              </ul>
-            )}
             <p className="mt-2 text-xs text-muted-foreground">Based on FDA drug label data.</p>
             {localSideEffects.length > 0 && (
               <div className="mt-3 rounded-md border border-border bg-card p-3">
@@ -343,7 +562,6 @@ const InteractionChecker = () => {
                 </div>
               </div>
             )}
-            <p className="mt-2 text-xs text-muted-foreground">Source: {profileInsight.source}</p>
           </div>
         )}
       </div>
@@ -388,25 +606,6 @@ const InteractionChecker = () => {
           </button>
         </form>
       </div>
-
-      {checked && (
-        <div className="space-y-3">
-          {results.map((r, i) => {
-            const cfg = severityConfig[r.severity];
-            const Icon = cfg.icon;
-            return (
-              <div key={i} className={`animate-fade-in rounded-xl border p-5 ${cfg.className}`} style={{ animationDelay: `${i * 0.1}s` }}>
-                <div className="mb-2 flex items-center gap-2">
-                  <Icon className="h-5 w-5" />
-                  <span className="font-semibold">{cfg.label}</span>
-                </div>
-                <p className="text-sm leading-relaxed opacity-90">{r.description}</p>
-                <p className="mt-2 text-xs font-medium opacity-80">Source: {r.source || 'RxNav'}</p>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       <p className="mt-6 text-xs text-muted-foreground">Consult healthcare provider if unsure. This system supports adherence tracking and does not replace medical advice.</p>
     </div>
