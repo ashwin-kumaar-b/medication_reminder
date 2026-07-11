@@ -1,0 +1,21 @@
+# Drug Interaction Module: How It Works
+
+We built a three-step pipeline specifically to check if two medications can be taken together safely. This handles global brand names (like US and Indian brands) and formats the output with a clear medical warning.
+
+---
+
+### Step 1: Brand-to-Chemical Translation (ApiService.getGenericName)
+Before checking for interactions, the app translates brand names into their active chemical ingredients:
+* The Code: Uses the free NIH RxNav API to query the active generic compounds.
+* Why it matters: If a user inputs "Advil", the system translates it to "ibuprofen". This ensures we are testing the actual active chemical compound, not the commercial brand name.
+
+### Step 2: Global AI Resolution & Assessment (_checkInteractions)
+The resolved generic names are sent to our AI safety engine:
+* The Code: We send a structured prompt to the LLM (llama-3.1-8b via Groq).
+* AI translation (for Indian brands): If RxNav misses a brand name (since RxNav is US-focused, it might not recognize Indian brands like "Dolo 650" or "Crocin"), the AI uses its global training to resolve the local brand to its active generic (e.g. paracetamol).
+* Clinical Grading: The AI calculates the interaction severity (High, Moderate, Low, Safe) and generates a clear action directive (e.g. "AVOID COMBINATION" or "MONITOR CLOSELY").
+
+### Step 3: Secure API Proxy (ApiService.getGroqCompletion)
+To perform the interaction check, the frontend calls the backend proxy, which talks to the Groq LLM:
+* The Code: The mobile app calls our local backend endpoint /api/medication-apis/groq/chat/completions.
+* Why it matters: It allows the mobile app to use the AI safety engine without exposing our private GROQ_API_KEY inside the mobile code, keeping the application secure.
