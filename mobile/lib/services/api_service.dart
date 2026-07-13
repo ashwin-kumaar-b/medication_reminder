@@ -225,4 +225,22 @@ class ApiService {
     }
     return brandName.toLowerCase();
   }
+
+  // Fetch real-time drug suggestions using NLM RxTerms API
+  static Future<List<String>> getDrugSuggestions(String query) async {
+    if (query.trim().length < 2) return [];
+    final url = Uri.parse('https://clinicaltables.nlm.nih.gov/api/rxterms/v3/search?terms=${Uri.encodeComponent(query)}');
+    try {
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is List && data.length > 1 && data[1] is List) {
+          return List<String>.from(data[1]);
+        }
+      }
+    } catch (e) {
+      print("Error fetching drug suggestions: $e");
+    }
+    return [];
+  }
 }

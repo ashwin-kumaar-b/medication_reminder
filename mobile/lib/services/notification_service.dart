@@ -81,7 +81,16 @@ class NotificationService {
       scheduleDate = scheduleDate.add(const Duration(days: 1));
     }
 
-    final scheduledTzTime = tz.TZDateTime.from(scheduleDate, tz.local);
+    // Convert local schedule date to UTC, then wrap in TZDateTime in UTC
+    final utcScheduleDate = scheduleDate.toUtc();
+    final scheduledTzTime = tz.TZDateTime.utc(
+      utcScheduleDate.year,
+      utcScheduleDate.month,
+      utcScheduleDate.day,
+      utcScheduleDate.hour,
+      utcScheduleDate.minute,
+      utcScheduleDate.second,
+    );
 
     await flutterLocalNotificationsPlugin.zonedSchedule(
       id,
@@ -103,7 +112,7 @@ class NotificationService {
           presentBadge: true,
         ),
       ),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: AndroidScheduleMode.approximate,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
