@@ -270,6 +270,20 @@ class DashboardScreen extends StatelessWidget {
               },
             ),
             IconButton(
+              icon: const Icon(Icons.edit_outlined, color: Colors.blue),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AddMedicineScreen(
+                      patientId: med.patientId,
+                      medication: med,
+                    ),
+                  ),
+                );
+              },
+            ),
+            IconButton(
               icon: const Icon(Icons.delete_outline, color: Colors.red),
               onPressed: () {
                 showDialog(

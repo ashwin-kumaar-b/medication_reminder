@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/medicine_provider.dart';
+import '../services/api_service.dart';
+
+import '../models/medication.dart';
 
 class AddMedicineScreen extends StatefulWidget {
   final String patientId;
-  const AddMedicineScreen({super.key, required this.patientId});
+  final Medication? medication;
+  const AddMedicineScreen({super.key, required this.patientId, this.medication});
 
   @override
   State<AddMedicineScreen> createState() => _AddMedicineScreenState();
@@ -14,6 +18,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
   final _formKey = GlobalKey<FormState>();
   final _drugNameController = TextEditingController();
   final _dosageController = TextEditingController();
+  final _focusNodeDrugName = FocusNode();
   
   String _selectedFoodTiming = 'before-food'; // 'before-food' | 'after-food'
   String _selectedCategory = 'other';
@@ -24,9 +29,35 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
   bool _submitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.medication != null) {
+      final med = widget.medication!;
+      _drugNameController.text = med.drugName;
+      _dosageController.text = med.dosage;
+      _selectedFoodTiming = med.foodTiming;
+      _selectedCategory = med.category;
+      _selectedCriticality = med.criticality;
+      _selectedFrequency = med.frequency;
+
+      try {
+        final parts = med.scheduleTime.split(':');
+        if (parts.length == 2) {
+          final hour = int.parse(parts[0]);
+          final minute = int.parse(parts[1]);
+          _selectedTime = TimeOfDay(hour: hour, minute: minute);
+        }
+      } catch (e) {
+        debugPrint('Failed to parse schedule time: $e');
+      }
+    }
+  }
+
+  @override
   void dispose() {
     _drugNameController.dispose();
     _dosageController.dispose();
+    _focusNodeDrugName.dispose();
     super.dispose();
   }
 
@@ -52,22 +83,43 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
     final formattedTime = '$hour:$formattedMinute';
 
     try {
-      await provider.addMedication(
-        patientId: widget.patientId,
-        drugName: _drugNameController.text,
-        dosage: _dosageController.text,
-        foodTiming: _selectedFoodTiming,
-        category: _selectedCategory,
-        criticality: _selectedCriticality,
-        scheduleTime: formattedTime,
-        frequency: _selectedFrequency,
-      );
+      if (widget.medication != null) {
+        final updated = Medication(
+          id: widget.medication!.id,
+          patientId: widget.medication!.patientId,
+          drugName: _drugNameController.text,
+          dosage: _dosageController.text,
+          foodTiming: _selectedFoodTiming,
+          category: _selectedCategory,
+          criticality: _selectedCriticality,
+          scheduleTime: formattedTime,
+          frequency: _selectedFrequency,
+          createdAt: widget.medication!.createdAt,
+          displayName: widget.medication!.displayName,
+          genericName: widget.medication!.genericName,
+          whoEssential: widget.medication!.whoEssential,
+          whoRiskTier: widget.medication!.whoRiskTier,
+          photoUrl: widget.medication!.photoUrl,
+        );
+        await provider.updateMedication(updated);
+      } else {
+        await provider.addMedication(
+          patientId: widget.patientId,
+          drugName: _drugNameController.text,
+          dosage: _dosageController.text,
+          foodTiming: _selectedFoodTiming,
+          category: _selectedCategory,
+          criticality: _selectedCriticality,
+          scheduleTime: formattedTime,
+          frequency: _selectedFrequency,
+        );
+      }
       if (mounted) {
         Navigator.pop(context);
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to add medicine: $e')),
+        SnackBar(content: Text('Failed to save medicine: $e')),
       );
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -78,9 +130,10 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isEditing = widget.medication != null;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Add Medication'),
+        title: Text(isEditing ? 'Edit Medication' : 'Add Medication'),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
       ),
@@ -91,20 +144,63 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextFormField(
-                controller: _drugNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Drug Name (e.g. Metformin)',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (v) => v == null || v.trim().isEmpty ? 'Please enter drug name' : null,
+              RawAutocomplete<String>(
+                textEditingController: _drugNameController,
+                focusNode: _focusNodeDrugName,
+                optionsBuilder: (TextEditingValue textEditingValue) async {
+                  return await ApiService.getDrugSuggestions(textEditingValue.text);
+                },
+                fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                  return TextFormField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    decoration: const InputDecoration(
+                      labelText: 'Drug Name',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (v) => v == null || v.trim().isEmpty ? 'Please enter drug name' : null,
+                    onFieldSubmitted: (_) => onFieldSubmitted(),
+                  );
+                },
+                optionsViewBuilder: (context, onSelected, options) {
+                  return Align(
+                    alignment: Alignment.topLeft,
+                    child: Material(
+                      elevation: 4.0,
+                      borderRadius: BorderRadius.circular(8.0),
+                      child: Container(
+                        width: MediaQuery.of(context).size.width - 32,
+                        color: Colors.white,
+                        constraints: const BoxConstraints(maxHeight: 200),
+                        child: ListView.builder(
+                          padding: EdgeInsets.zero,
+                          shrinkWrap: true,
+                          itemCount: options.length,
+                          itemBuilder: (context, index) {
+                            final option = options.elementAt(index);
+                            return InkWell(
+                              onTap: () => onSelected(option),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+                                child: Text(
+                                  option,
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 16),
 
               TextFormField(
                 controller: _dosageController,
                 decoration: const InputDecoration(
-                  labelText: 'Dosage (e.g. 500mg)',
+                  labelText: 'Dosage (e.g. 500mg or 1 tablet)',
                   border: OutlineInputBorder(),
                 ),
                 validator: (v) => v == null || v.trim().isEmpty ? 'Please enter dosage info' : null,
@@ -178,7 +274,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
                         width: 20,
                         child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                       )
-                    : const Text('Add Medication'),
+                    : Text(isEditing ? 'Update Medication' : 'Add Medication'),
               ),
             ],
           ),

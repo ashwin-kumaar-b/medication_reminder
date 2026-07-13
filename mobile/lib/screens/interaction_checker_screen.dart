@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../utils/medicine_list.dart';
 
 
 class InteractionCheckerScreen extends StatefulWidget {
@@ -13,6 +14,8 @@ class InteractionCheckerScreen extends StatefulWidget {
 class _InteractionCheckerScreenState extends State<InteractionCheckerScreen> {
   final _drugAController = TextEditingController();
   final _drugBController = TextEditingController();
+  final _focusNodeA = FocusNode();
+  final _focusNodeB = FocusNode();
 
   bool _loading = false;
   String? _error;
@@ -22,6 +25,8 @@ class _InteractionCheckerScreenState extends State<InteractionCheckerScreen> {
   void dispose() {
     _drugAController.dispose();
     _drugBController.dispose();
+    _focusNodeA.dispose();
+    _focusNodeB.dispose();
     super.dispose();
   }
 
@@ -125,15 +130,107 @@ class _InteractionCheckerScreenState extends State<InteractionCheckerScreen> {
             ),
             const SizedBox(height: 16),
 
-            TextField(
-              controller: _drugAController,
-              decoration: const InputDecoration(labelText: 'Primary Medication (e.g. Aspirin)', border: OutlineInputBorder()),
+            RawAutocomplete<String>(
+              textEditingController: _drugAController,
+              focusNode: _focusNodeA,
+              optionsBuilder: (TextEditingValue textEditingValue) async {
+                return await ApiService.getDrugSuggestions(textEditingValue.text);
+              },
+              fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                return TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  decoration: const InputDecoration(
+                    labelText: 'Primary Medication',
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (_) => onFieldSubmitted(),
+                );
+              },
+              optionsViewBuilder: (context, onSelected, options) {
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Material(
+                    elevation: 4.0,
+                    borderRadius: BorderRadius.circular(8.0),
+                    child: Container(
+                      width: MediaQuery.of(context).size.width - 32,
+                      color: Colors.white,
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      child: ListView.builder(
+                        padding: EdgeInsets.zero,
+                        shrinkWrap: true,
+                        itemCount: options.length,
+                        itemBuilder: (context, index) {
+                          final option = options.elementAt(index);
+                          return InkWell(
+                            onTap: () => onSelected(option),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+                              child: Text(
+                                option,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 16),
 
-            TextField(
-              controller: _drugBController,
-              decoration: const InputDecoration(labelText: 'Secondary Medication (e.g. Ibuprofen)', border: OutlineInputBorder()),
+            RawAutocomplete<String>(
+              textEditingController: _drugBController,
+              focusNode: _focusNodeB,
+              optionsBuilder: (TextEditingValue textEditingValue) async {
+                return await ApiService.getDrugSuggestions(textEditingValue.text);
+              },
+              fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                return TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  decoration: const InputDecoration(
+                    labelText: 'Secondary Medication',
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (_) => onFieldSubmitted(),
+                );
+              },
+              optionsViewBuilder: (context, onSelected, options) {
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Material(
+                    elevation: 4.0,
+                    borderRadius: BorderRadius.circular(8.0),
+                    child: Container(
+                      width: MediaQuery.of(context).size.width - 32,
+                      color: Colors.white,
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      child: ListView.builder(
+                        padding: EdgeInsets.zero,
+                        shrinkWrap: true,
+                        itemCount: options.length,
+                        itemBuilder: (context, index) {
+                          final option = options.elementAt(index);
+                          return InkWell(
+                            onTap: () => onSelected(option),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+                              child: Text(
+                                option,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 20),
 
