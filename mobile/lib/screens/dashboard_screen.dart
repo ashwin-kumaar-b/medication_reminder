@@ -74,7 +74,44 @@ class DashboardScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              // Care Alerts (Shown prominently at the top if there are active alerts)
+              if (patientNotifs.isNotEmpty) ...[
+                const Text(
+                  'Critical Alerts',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                ),
+                const SizedBox(height: 8),
+                ...patientNotifs.map((notif) {
+                  Color alertColor = Colors.green;
+                  Color bgColor = const Color(0xFFEFFDF5);
+                  if (notif.level == 'yellow') {
+                    alertColor = Colors.amber[800]!;
+                    bgColor = const Color(0xFFFEFCE8);
+                  }
+                  if (notif.level == 'red') {
+                    alertColor = Colors.red;
+                    bgColor = const Color(0xFFFEF2F2);
+                  }
+                  return Card(
+                    color: bgColor,
+                    elevation: 1,
+                    shape: RoundedRectangleBorder(
+                      side: BorderSide(color: alertColor.withOpacity(0.3), width: 1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ListTile(
+                      leading: Icon(Icons.warning_amber_rounded, color: alertColor),
+                      title: Text(notif.title, style: TextStyle(fontWeight: FontWeight.bold, color: alertColor)),
+                      subtitle: Text(notif.message),
+                      trailing: Text(
+                        notif.createdAt.length > 10 ? notif.createdAt.substring(11, 16) : '',
+                        style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                      ),
+                    ),
+                  );
+                }).toList(),
+                const SizedBox(height: 16),
+              ],
 
               // 2. Action Grid for AI / Health Utilities
               GridView.count(

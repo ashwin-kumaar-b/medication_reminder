@@ -2,6 +2,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:intl/intl.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -14,6 +15,14 @@ class NotificationService {
   Future<void> init() async {
     // 1. Initialize timezone databases
     tz.initializeTimeZones();
+    try {
+      final timeZoneInfo = await FlutterTimezone.getLocalTimezone();
+      final String timeZoneName = timeZoneInfo.identifier;
+      tz.setLocalLocation(tz.getLocation(timeZoneName));
+    } catch (e) {
+      print('Failed to set local timezone, falling back to UTC: $e');
+      tz.setLocalLocation(tz.getLocation('UTC'));
+    }
 
     // 2. Setup Android initialization settings
     const AndroidInitializationSettings initializationSettingsAndroid =
@@ -81,15 +90,14 @@ class NotificationService {
       scheduleDate = scheduleDate.add(const Duration(days: 1));
     }
 
-    // Convert local schedule date to UTC, then wrap in TZDateTime in UTC
-    final utcScheduleDate = scheduleDate.toUtc();
-    final scheduledTzTime = tz.TZDateTime.utc(
-      utcScheduleDate.year,
-      utcScheduleDate.month,
-      utcScheduleDate.day,
-      utcScheduleDate.hour,
-      utcScheduleDate.minute,
-      utcScheduleDate.second,
+    final scheduledTzTime = tz.TZDateTime(
+      tz.local,
+      scheduleDate.year,
+      scheduleDate.month,
+      scheduleDate.day,
+      scheduleDate.hour,
+      scheduleDate.minute,
+      scheduleDate.second,
     );
 
     await flutterLocalNotificationsPlugin.zonedSchedule(
@@ -112,7 +120,7 @@ class NotificationService {
           presentBadge: true,
         ),
       ),
-      androidScheduleMode: AndroidScheduleMode.approximate,
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,

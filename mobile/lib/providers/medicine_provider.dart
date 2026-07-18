@@ -43,6 +43,7 @@ class MedicineProvider extends ChangeNotifier {
       _notifications = decoded.map((item) => NotificationEvent.fromJson(item)).toList();
     }
     notifyListeners();
+    await _syncScheduledNotifications();
     await reloadData();
   }
 
@@ -62,6 +63,12 @@ class MedicineProvider extends ChangeNotifier {
 
       await _saveLocalCache();
       await _syncScheduledNotifications();
+
+      // Automatically scan for interactions on reload
+      final patientIds = _medications.map((m) => m.patientId).toSet();
+      for (final pId in patientIds) {
+        await _checkAndNotifyInteractions(pId);
+      }
     } catch (e) {
       debugPrint('Failed to sync medical data from backend: $e');
     } finally {
@@ -110,12 +117,20 @@ class MedicineProvider extends ChangeNotifier {
     final String medId = const HtmlCrypto().randomUuid();
     final String createdAt = DateTime.now().toIso8601String();
 
+    // Resolve generic name from API
+    String resolvedGeneric = genericName ?? drugName;
+    try {
+      resolvedGeneric = await ApiService.getGenericName(drugName);
+    } catch (e) {
+      debugPrint('Failed to resolve generic name: $e');
+    }
+
     final Medication newMed = Medication(
       id: medId,
       patientId: patientId,
       drugName: drugName,
-      displayName: displayName,
-      genericName: genericName,
+      displayName: displayName ?? drugName,
+      genericName: resolvedGeneric,
       whoEssential: whoEssential,
       whoRiskTier: whoRiskTier,
       dosage: dosage,
@@ -131,10 +146,12 @@ class MedicineProvider extends ChangeNotifier {
     _medications.add(newMed);
     notifyListeners();
     await _saveLocalCache();
+    await _syncScheduledNotifications();
 
     try {
       await ApiService.upsertMedication(newMed.toJson());
-      await reloadData();
+      // Trigger interaction checks automatically in the background
+      _checkAndNotifyInteractions(patientId);
     } catch (e) {
       debugPrint('Offline mode or failed to save medication to server: $e');
     }
@@ -147,10 +164,10 @@ class MedicineProvider extends ChangeNotifier {
     _logs.removeWhere((log) => log.medicationId == id);
     notifyListeners();
     await _saveLocalCache();
+    await _syncScheduledNotifications();
 
     try {
       await ApiService.deleteMedication(id);
-      await reloadData();
     } catch (e) {
       debugPrint('Failed to delete medication from server: $e');
     }
@@ -160,13 +177,41 @@ class MedicineProvider extends ChangeNotifier {
   Future<void> updateMedication(Medication updatedMed) async {
     final index = _medications.indexWhere((m) => m.id == updatedMed.id);
     if (index != -1) {
-      _medications[index] = updatedMed;
+      // Resolve generic name if it changed or is missing
+      Medication medToSave = updatedMed;
+      if (updatedMed.drugName != _medications[index].drugName || updatedMed.genericName == null) {
+        try {
+          final resolvedGeneric = await ApiService.getGenericName(updatedMed.drugName);
+          medToSave = Medication(
+            id: updatedMed.id,
+            patientId: updatedMed.patientId,
+            drugName: updatedMed.drugName,
+            displayName: updatedMed.displayName ?? updatedMed.drugName,
+            genericName: resolvedGeneric,
+            whoEssential: updatedMed.whoEssential,
+            whoRiskTier: updatedMed.whoRiskTier,
+            dosage: updatedMed.dosage,
+            photoUrl: updatedMed.photoUrl,
+            foodTiming: updatedMed.foodTiming,
+            category: updatedMed.category,
+            criticality: updatedMed.criticality,
+            scheduleTime: updatedMed.scheduleTime,
+            frequency: updatedMed.frequency,
+            createdAt: updatedMed.createdAt,
+          );
+        } catch (e) {
+          debugPrint('Failed to resolve generic name on update: $e');
+        }
+      }
+
+      _medications[index] = medToSave;
       notifyListeners();
       await _saveLocalCache();
+      await _syncScheduledNotifications();
 
       try {
-        await ApiService.upsertMedication(updatedMed.toJson());
-        await reloadData();
+        await ApiService.upsertMedication(medToSave.toJson());
+        _checkAndNotifyInteractions(medToSave.patientId);
       } catch (e) {
         debugPrint('Failed to update medication on server: $e');
       }
@@ -257,9 +302,93 @@ class MedicineProvider extends ChangeNotifier {
 
     try {
       await ApiService.upsertNotification(newNotification.toJson());
-      await reloadData();
     } catch (e) {
       debugPrint('Failed to save notification event to server: $e');
+    }
+  }
+
+  // Automatic Drug-to-Drug Interaction Checking and Notification Generation
+  Future<void> _checkAndNotifyInteractions(String patientId) async {
+    final patientMeds = _medications.where((m) => m.patientId == patientId).toList();
+    if (patientMeds.length < 2) return;
+
+    for (int i = 0; i < patientMeds.length; i++) {
+      for (int j = i + 1; j < patientMeds.length; j++) {
+        final medA = patientMeds[i];
+        final medB = patientMeds[j];
+
+        // Deduplication key
+        final ids = [medA.id, medB.id]..sort();
+        final dedupeKey = 'interaction_${patientId}_${ids[0]}_${ids[1]}';
+
+        // Check if already processed
+        final isAlreadyNotified = _notifications.any((n) => n.dedupeKey == dedupeKey);
+        if (isAlreadyNotified) continue;
+
+        try {
+          // Resolve generic names
+          final genericA = medA.genericName ?? await ApiService.getGenericName(medA.drugName);
+          final genericB = medB.genericName ?? await ApiService.getGenericName(medB.drugName);
+
+          final prompt = [
+            'You are a clinical safety assistant for a medication reminder app.',
+            'Provide a drug-to-drug interaction analysis between two medications.',
+            'The user is taking: "${medA.drugName}" and "${medB.drugName}".',
+            'Our database mapped these to active ingredients: "$genericA" and "$genericB".',
+            'If either of these are brand names (including local brand names from other countries like India, e.g. Dolo 650, Crocin, Calpol, Combiflam), please resolve them to their active generic chemical names.',
+            'Return only JSON with this exact shape:',
+            '{"severity":"high|moderate|low|safe|none","directive":"AVOID COMBINATION or CHOOSE ALTERNATIVE or MONITOR CLOSELY or SAFE","genericA":"...","genericB":"...","summary":"...","explanation":"...","recommendations":["..."],"cautions":["..."]}'
+          ].join('\n');
+
+          final res = await ApiService.getGroqCompletion({
+            'model': 'llama-3.1-8b-instant',
+            'temperature': 0.2,
+            'max_tokens': 400,
+            'response_format': {'type': 'json_object'},
+            'messages': [
+              {'role': 'system', 'content': 'You are a careful medication safety assistant. Return strict JSON only.'},
+              {'role': 'user', 'content': prompt}
+            ]
+          });
+
+          if (res != null && res['choices'] != null && res['choices'].isNotEmpty) {
+            final text = res['choices'][0]['message']['content'];
+            if (text is String) {
+              final cleaned = text.replaceAll(RegExp(r'```json|```'), '').trim();
+              final results = Map<String, dynamic>.from(json.decode(cleaned));
+              final severity = results['severity']?.toString().toLowerCase();
+
+              if (severity == 'high' || severity == 'moderate') {
+                final level = severity == 'high' ? 'red' : 'yellow';
+                final type = 'patient-risk';
+                final title = 'Drug Risk: ${medA.drugName} + ${medB.drugName}';
+                final message = results['summary'] ?? results['explanation'] ?? 'Potential interaction detected.';
+
+                await addNotification(
+                  patientId: patientId,
+                  medicationId: medA.id,
+                  level: level,
+                  type: type,
+                  title: title,
+                  message: message,
+                  dedupeKey: dedupeKey,
+                );
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('Failed to run interaction check for ${medA.drugName} and ${medB.drugName}: $e');
+        }
+      }
+    }
+
+    // Refresh database view
+    try {
+      final remoteNotifs = await ApiService.getNotifications();
+      _notifications = remoteNotifs.map((item) => NotificationEvent.fromJson(item)).toList();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Failed to update local notifications list: $e');
     }
   }
 }
