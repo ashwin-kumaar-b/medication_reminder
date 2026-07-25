@@ -297,7 +297,7 @@ class AuthProvider extends ChangeNotifier {
       await ApiService.upsertNotification(notificationPayload);
       return {'ok': true, 'requestSent': true, 'patient': targetPatient};
     } catch (e) {
-      return {'ok': false, 'error': 'Patient with this ID not found.'};
+      return {'ok': false, 'error': 'Failed to link: $e'};
     }
   }
 
