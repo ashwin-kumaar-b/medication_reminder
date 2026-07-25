@@ -22,6 +22,7 @@ class DashboardScreen extends StatelessWidget {
     // Filter medications for this patient
     final patientMeds = medicine.medications.where((m) => m.patientId == user.id).toList();
     final patientNotifs = medicine.notifications.where((n) => n.patientId == user.id).toList();
+    final feedNotifs = patientNotifs.where((n) => !(n.type == 'caretaker-alert' && n.title == 'Caretaker Link Request')).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -127,7 +128,36 @@ class DashboardScreen extends StatelessWidget {
               title: const Text('Logout'),
               onTap: () {
                 Navigator.pop(context); // Close drawer
-                auth.logout();
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Log Out'),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Name: ${user.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text('Email: ${user.email}'),
+                        Text('Role: ${user.role.toUpperCase()}'),
+                        const SizedBox(height: 16),
+                        const Text('Are you sure you want to log out of your account?'),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          auth.logout();
+                        },
+                        child: const Text('Log Out', style: TextStyle(color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                );
               },
             ),
           ],
@@ -184,10 +214,10 @@ class DashboardScreen extends StatelessWidget {
                 ...patientNotifs.map((notif) {
                   if (notif.type == 'caretaker-alert' && notif.title == 'Caretaker Link Request') {
                     return Card(
-                      color: const Color(0xFFFEFCE8),
+                      color: const Color(0xFFEEF2FF),
                       elevation: 2,
                       shape: RoundedRectangleBorder(
-                        side: const BorderSide(color: Colors.amber, width: 1.5),
+                        side: const BorderSide(color: Color(0xFF818CF8), width: 1.5),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Padding(
@@ -197,11 +227,11 @@ class DashboardScreen extends StatelessWidget {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.people_outline, color: Colors.amber),
+                                const Icon(Icons.people_outline, color: Color(0xFF4F46E5)),
                                 const SizedBox(width: 8),
                                 Text(
                                   notif.title,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amber),
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4F46E5)),
                                 ),
                               ],
                             ),
@@ -339,15 +369,15 @@ class DashboardScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A)),
               ),
               const SizedBox(height: 8),
-              if (patientNotifs.isEmpty)
+              if (feedNotifs.isEmpty)
                 const Text('No alerts or notifications recorded.')
               else
                 ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: patientNotifs.length > 5 ? 5 : patientNotifs.length,
+                  itemCount: feedNotifs.length > 5 ? 5 : feedNotifs.length,
                   itemBuilder: (context, index) {
-                    final notif = patientNotifs[index];
+                    final notif = feedNotifs[index];
                     Color alertColor = Colors.green;
                     if (notif.level == 'yellow') alertColor = Colors.amber[700]!;
                     if (notif.level == 'red') alertColor = Colors.red;

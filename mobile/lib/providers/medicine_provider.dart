@@ -61,6 +61,27 @@ class MedicineProvider extends ChangeNotifier {
       final remoteNotifs = await ApiService.getNotifications();
       _notifications = remoteNotifs.map((item) => NotificationEvent.fromJson(item)).toList();
 
+      // Trigger instant push notifications for new caretaker requests
+      final prefs = await SharedPreferences.getInstance();
+      final shownList = prefs.getStringList('shown_link_requests') ?? [];
+      bool updatedShown = false;
+      for (final notif in _notifications) {
+        if (notif.type == 'caretaker-alert' && notif.title == 'Caretaker Link Request') {
+          if (!shownList.contains(notif.id)) {
+            await _notificationService.showImmediateNotification(
+              id: notif.id.hashCode,
+              title: notif.title,
+              body: notif.message,
+            );
+            shownList.add(notif.id);
+            updatedShown = true;
+          }
+        }
+      }
+      if (updatedShown) {
+        await prefs.setStringList('shown_link_requests', shownList);
+      }
+
       await _saveLocalCache();
       await _syncScheduledNotifications();
 

@@ -114,7 +114,38 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () => auth.logout(),
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Log Out'),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Name: ${caretaker.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      Text('Email: ${caretaker.email}'),
+                      Text('Role: ${caretaker.role.toUpperCase()}'),
+                      const SizedBox(height: 16),
+                      const Text('Are you sure you want to log out of your account?'),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        auth.logout();
+                      },
+                      child: const Text('Log Out', style: TextStyle(color: Colors.red)),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ],
       ),
