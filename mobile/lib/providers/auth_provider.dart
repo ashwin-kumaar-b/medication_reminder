@@ -116,6 +116,8 @@ class AuthProvider extends ChangeNotifier {
         'password': newUser.password,
         'role': newUser.role,
         'ui_mode': newUser.uiMode,
+        'patient_id': newUser.patientId,
+        'caretaker_id': newUser.caretakerId,
       };
 
       Map<String, dynamic>? healthPayload;
@@ -198,6 +200,7 @@ class AuthProvider extends ChangeNotifier {
         'password': newPatient.password,
         'role': newPatient.role,
         'ui_mode': newPatient.uiMode,
+        'patient_id': newPatient.patientId,
       };
 
       final healthPayload = {

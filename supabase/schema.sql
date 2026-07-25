@@ -15,6 +15,8 @@ create table if not exists users (
 alter table users add column if not exists ui_mode text;
 alter table users add column if not exists phone text unique;
 alter table users alter column email drop not null;
+alter table users add column if not exists patient_id text;
+alter table users add column if not exists caretaker_id text;
 
 create table if not exists medications (
   id uuid primary key default gen_random_uuid(),
