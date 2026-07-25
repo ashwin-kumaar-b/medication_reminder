@@ -68,7 +68,7 @@ class DashboardScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Allergies: ${user.allergies.map((a) => "${a.category}: ${a.trigger}").join(", ")}',
+                    'Allergies: ${user.allergies.map((a) => "${a['category']}: ${a['trigger']}").join(", ")}',
                     style: TextStyle(color: Colors.grey[700], fontSize: 13),
                   ),
                   const Divider(),
