@@ -287,7 +287,7 @@ class AuthProvider extends ChangeNotifier {
         'patient_id': targetPatient.id,
         'caretaker_id': caretakerId,
         'level': 'yellow',
-        'type': 'caretaker-request',
+        'type': 'caretaker-alert',
         'title': 'Caretaker Link Request',
         'message': '${caretaker.name} (Phone: $caretakerPhone, Email: ${caretaker.email}) wants to link as your caretaker.',
         'dedupe_key': 'caretaker-request-$caretakerId-${targetPatient.id}',
