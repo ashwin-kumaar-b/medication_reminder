@@ -182,7 +182,7 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 ...patientNotifs.map((notif) {
-                  if (notif.type == 'caretaker-request') {
+                  if (notif.type == 'caretaker-alert' && notif.title == 'Caretaker Link Request') {
                     return Card(
                       color: const Color(0xFFFEFCE8),
                       elevation: 2,
