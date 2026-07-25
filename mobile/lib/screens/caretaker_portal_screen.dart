@@ -21,8 +21,10 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
   final _pIllnessController = TextEditingController();
 
   bool _loading = false;
-  String? _errorMessage;
-  String? _successMessage;
+  String? _linkErrorMessage;
+  String? _linkSuccessMessage;
+  String? _createErrorMessage;
+  String? _createSuccessMessage;
 
   @override
   void dispose() {
@@ -37,7 +39,11 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
 
   Future<void> _linkPatient(String caretakerId) async {
     if (_linkController.text.trim().isEmpty) return;
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _linkErrorMessage = null;
+      _linkSuccessMessage = null;
+    });
 
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final res = await auth.linkExistingPatient(caretakerId, _linkController.text);
@@ -46,21 +52,25 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
       _loading = false;
       if (res['ok']) {
         if (res['requestSent'] == true) {
-          _successMessage = 'Request sent successfully to ${res['patient'].name}. Waiting for approval.';
+          _linkSuccessMessage = 'Request sent successfully to ${res['patient'].name}. Waiting for approval.';
         } else {
-          _successMessage = 'Successfully linked patient: ${res['patient'].name}';
+          _linkSuccessMessage = 'Successfully linked patient: ${res['patient'].name}';
         }
-        _errorMessage = null;
+        _linkErrorMessage = null;
         _linkController.clear();
       } else {
-        _errorMessage = res['error'];
-        _successMessage = null;
+        _linkErrorMessage = res['error'];
+        _linkSuccessMessage = null;
       }
     });
   }
 
   Future<void> _createPatient(String caretakerId) async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _createErrorMessage = null;
+      _createSuccessMessage = null;
+    });
 
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final res = await auth.createPatientForCaretaker(
@@ -75,14 +85,16 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
     setState(() {
       _loading = false;
       if (res['ok']) {
-        _successMessage = 'Patient profile created successfully!';
+        _createSuccessMessage = 'Patient profile created successfully!';
         _pNameController.clear();
         _pEmailController.clear();
         _pPassController.clear();
         _pAgeController.clear();
         _pIllnessController.clear();
+        _createErrorMessage = null;
       } else {
-        _errorMessage = res['error'];
+        _createErrorMessage = res['error'];
+        _createSuccessMessage = null;
       }
     });
   }
@@ -139,15 +151,6 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-
-              if (_errorMessage != null) ...[
-                Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
-                const SizedBox(height: 8),
-              ],
-              if (_successMessage != null) ...[
-                Text(_successMessage!, style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-              ],
 
               // Linked Patients checklist
               const Text(
@@ -256,6 +259,14 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
                   ),
                 ],
               ),
+              if (_linkErrorMessage != null) ...[
+                const SizedBox(height: 8),
+                Text(_linkErrorMessage!, style: const TextStyle(color: Colors.red)),
+              ],
+              if (_linkSuccessMessage != null) ...[
+                const SizedBox(height: 8),
+                Text(_linkSuccessMessage!, style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+              ],
 
               const SizedBox(height: 24),
               const Text(
@@ -296,6 +307,14 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
                         onPressed: _loading ? null : () => _createPatient(caretaker.id),
                         child: const Text('Create Profile'),
                       ),
+                      if (_createErrorMessage != null) ...[
+                        const SizedBox(height: 8),
+                        Text(_createErrorMessage!, style: const TextStyle(color: Colors.red)),
+                      ],
+                      if (_createSuccessMessage != null) ...[
+                        const SizedBox(height: 8),
+                        Text(_createSuccessMessage!, style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                      ],
                     ],
                   ),
                 ),
