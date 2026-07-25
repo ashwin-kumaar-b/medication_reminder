@@ -265,6 +265,9 @@ class AuthProvider extends ChangeNotifier {
         orElse: () => throw Exception('Patient not found'),
       );
 
+      final caretaker = _currentUser;
+      if (caretaker == null) throw Exception('Caretaker session not found');
+
       final isAlreadyLinked = _caretakerLinks.any(
         (link) => link['caretakerId'] == caretakerId && link['patientId'] == targetPatient.id,
       );
@@ -272,9 +275,24 @@ class AuthProvider extends ChangeNotifier {
         return {'ok': false, 'error': 'Patient is already linked to your account.'};
       }
 
-      await ApiService.upsertCaretakerPatient(caretakerId, targetPatient.id);
-      await loadUsers();
-      return {'ok': true, 'patient': targetPatient};
+      final String notifId = const HtmlCrypto().randomUuid();
+      final String timestamp = DateTime.now().toIso8601String();
+      final String caretakerPhone = caretaker.phoneNumber ?? 'None';
+
+      final notificationPayload = {
+        'id': notifId,
+        'patient_id': targetPatient.id,
+        'caretaker_id': caretakerId,
+        'level': 'yellow',
+        'type': 'caretaker-request',
+        'title': 'Caretaker Link Request',
+        'message': '${caretaker.name} (Phone: $caretakerPhone, Email: ${caretaker.email}) wants to link as your caretaker.',
+        'dedupe_key': 'caretaker-request-$caretakerId-${targetPatient.id}',
+        'created_at': timestamp,
+      };
+
+      await ApiService.upsertNotification(notificationPayload);
+      return {'ok': true, 'requestSent': true, 'patient': targetPatient};
     } catch (e) {
       return {'ok': false, 'error': 'Patient with this ID not found.'};
     }

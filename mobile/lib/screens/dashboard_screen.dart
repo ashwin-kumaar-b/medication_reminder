@@ -8,6 +8,8 @@ import 'interaction_checker_screen.dart';
 import 'food_checker_screen.dart';
 import 'missed_doses_screen.dart';
 
+import '../services/api_service.dart';
+
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
@@ -180,6 +182,87 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 ...patientNotifs.map((notif) {
+                  if (notif.type == 'caretaker-request') {
+                    return Card(
+                      color: const Color(0xFFFEFCE8),
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(
+                        side: const BorderSide(color: Colors.amber, width: 1.5),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.people_outline, color: Colors.amber),
+                                const SizedBox(width: 8),
+                                Text(
+                                  notif.title,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amber),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              notif.message,
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                TextButton(
+                                  onPressed: () async {
+                                    try {
+                                      await ApiService.deleteNotification(notif.id);
+                                      await medicine.reloadData();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Request rejected.')),
+                                      );
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Failed to reject: $e')),
+                                      );
+                                    }
+                                  },
+                                  child: const Text('Reject', style: TextStyle(color: Colors.red)),
+                                ),
+                                const SizedBox(width: 8),
+                                ElevatedButton(
+                                  onPressed: () async {
+                                    try {
+                                      if (notif.caretakerId != null) {
+                                        await ApiService.upsertCaretakerPatient(notif.caretakerId!, user.id);
+                                        await ApiService.deleteNotification(notif.id);
+                                        await auth.loadUsers();
+                                        await medicine.reloadData();
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Successfully linked caretaker!')),
+                                        );
+                                      }
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Failed to accept: $e')),
+                                      );
+                                    }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF0F766E),
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: const Text('Accept'),
+                                ),
+                              ],
+                            )
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
                   Color alertColor = Colors.green;
                   Color bgColor = const Color(0xFFEFFDF5);
                   if (notif.level == 'yellow') {

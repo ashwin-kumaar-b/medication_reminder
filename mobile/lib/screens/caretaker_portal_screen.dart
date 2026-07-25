@@ -45,10 +45,16 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
     setState(() {
       _loading = false;
       if (res['ok']) {
-        _successMessage = 'Successfully linked patient: ${res['patient'].name}';
+        if (res['requestSent'] == true) {
+          _successMessage = 'Request sent successfully to ${res['patient'].name}. Waiting for approval.';
+        } else {
+          _successMessage = 'Successfully linked patient: ${res['patient'].name}';
+        }
+        _errorMessage = null;
         _linkController.clear();
       } else {
         _errorMessage = res['error'];
+        _successMessage = null;
       }
     });
   }
