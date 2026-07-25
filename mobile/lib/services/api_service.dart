@@ -154,6 +154,14 @@ class ApiService {
     throw Exception(response.body);
   }
 
+  static Future<Map<String, dynamic>> deleteNotificationsByMedication(String medicationId) async {
+    final response = await http.delete(Uri.parse('$baseUrl/api/notifications/by-medication/$medicationId'));
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    }
+    throw Exception(response.body);
+  }
+
   // USDA Food Search Proxy
   static Future<Map<String, dynamic>?> searchUsdaFood(String query) async {
     final response = await http.get(
