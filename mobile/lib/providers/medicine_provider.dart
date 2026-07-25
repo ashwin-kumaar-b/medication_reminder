@@ -86,16 +86,33 @@ class MedicineProvider extends ChangeNotifier {
 
   // Sync Android/iOS alarms with current medications list
   Future<void> _syncScheduledNotifications() async {
-    await _notificationService.cancelAllNotifications();
+    print('--- Starting _syncScheduledNotifications ---');
+    print('Total medications to schedule: ${_medications.length}');
+    try {
+      print('Cancelling all existing scheduled alarms...');
+      await _notificationService.cancelAllNotifications();
+      print('All existing scheduled alarms cancelled successfully.');
+    } catch (e) {
+      print('Failed to cancel existing notifications: $e');
+    }
+
     for (int i = 0; i < _medications.length; i++) {
       final med = _medications[i];
-      await _notificationService.scheduleDailyNotification(
-        id: med.id.hashCode,
-        title: 'Medication Alert: ${med.drugName}',
-        body: 'Time to take your dosage of ${med.dosage} (${med.foodTiming})',
-        timeString: med.scheduleTime,
-      );
+      final int notifId = med.id.hashCode;
+      print('Processing medication [$i]: "${med.drugName}" (ID Hash: $notifId, Time: ${med.scheduleTime})');
+      try {
+        await _notificationService.scheduleDailyNotification(
+          id: notifId,
+          title: 'Medication Alert: ${med.drugName}',
+          body: 'Time to take your dosage of ${med.dosage} (${med.foodTiming})',
+          timeString: med.scheduleTime,
+        );
+        print('Successfully processed medication "$notifId"');
+      } catch (e) {
+        print('Error occurred while scheduling alarm for "${med.drugName}" (ID Hash: $notifId): $e');
+      }
     }
+    print('--- Finished _syncScheduledNotifications ---');
   }
 
   // Add medication
@@ -162,14 +179,17 @@ class MedicineProvider extends ChangeNotifier {
   Future<void> removeMedication(String id) async {
     _medications.removeWhere((med) => med.id == id);
     _logs.removeWhere((log) => log.medicationId == id);
+    // Remove local notifications related to this medication
+    _notifications.removeWhere((notif) => notif.medicationId == id || notif.dedupeKey.contains(id));
     notifyListeners();
     await _saveLocalCache();
     await _syncScheduledNotifications();
 
     try {
       await ApiService.deleteMedication(id);
+      await ApiService.deleteNotificationsByMedication(id);
     } catch (e) {
-      debugPrint('Failed to delete medication from server: $e');
+      debugPrint('Failed to delete medication or its notifications from server: $e');
     }
   }
 
@@ -299,6 +319,17 @@ class MedicineProvider extends ChangeNotifier {
     _notifications.insert(0, newNotification);
     notifyListeners();
     await _saveLocalCache();
+
+    // Trigger local push notification popup banner at the top of the device screen
+    try {
+      await _notificationService.showImmediateNotification(
+        id: dedupeKey.hashCode,
+        title: title,
+        body: message,
+      );
+    } catch (e) {
+      debugPrint('Failed to display local system notification popup: $e');
+    }
 
     try {
       await ApiService.upsertNotification(newNotification.toJson());

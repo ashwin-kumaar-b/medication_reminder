@@ -26,12 +26,110 @@ class DashboardScreen extends StatelessWidget {
         title: const Text('Patient Dashboard'),
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => auth.logout(),
-          ),
-        ],
+      ),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            UserAccountsDrawerHeader(
+              decoration: const BoxDecoration(
+                color: Color(0xFF1E3A8A),
+              ),
+              currentAccountPicture: CircleAvatar(
+                backgroundColor: Colors.white,
+                child: Text(
+                  user.name.isNotEmpty ? user.name[0].toUpperCase() : 'U',
+                  style: const TextStyle(
+                    fontSize: 24.0,
+                    color: Color(0xFF1E3A8A),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              accountName: Text(
+                user.name,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              accountEmail: Text(user.email),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Smart Care ID: ${user.patientId ?? "N/A"}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Chronic Diseases: ${user.chronicDiseases.join(", ")}',
+                    style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Allergies: ${user.allergies.map((a) => "${a.category}: ${a.trigger}").join(", ")}',
+                    style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                  ),
+                  const Divider(),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.biotech_outlined, color: Color(0xFF0D9488)),
+              title: const Text('Drug Interaction'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const InteractionCheckerScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.restaurant_outlined, color: Color(0xFFD97706)),
+              title: const Text('Food Compatibility'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const FoodCheckerScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626)),
+              title: const Text('Missed Dose Advice'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const MissedDosesScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_circle_outline, color: Color(0xFF2563EB)),
+              title: const Text('Add Medicine'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => AddMedicineScreen(patientId: user.id)),
+                );
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.grey),
+              title: const Text('Logout'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer
+                auth.logout();
+              },
+            ),
+          ],
+        ),
       ),
       body: RefreshIndicator(
         onRefresh: () async {
@@ -112,47 +210,7 @@ class DashboardScreen extends StatelessWidget {
                 }).toList(),
                 const SizedBox(height: 16),
               ],
-
-              // 2. Action Grid for AI / Health Utilities
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 1.5,
-                children: [
-                  _utilityButton(
-                    context,
-                    title: 'Drug Interaction',
-                    icon: Icons.biotech_outlined,
-                    color: const Color(0xFF0D9488),
-                    page: const InteractionCheckerScreen(),
-                  ),
-                  _utilityButton(
-                    context,
-                    title: 'Food Compatibility',
-                    icon: Icons.restaurant_outlined,
-                    color: const Color(0xFFD97706),
-                    page: const FoodCheckerScreen(),
-                  ),
-                  _utilityButton(
-                    context,
-                    title: 'Missed Dose Advice',
-                    icon: Icons.warning_amber_rounded,
-                    color: const Color(0xFFDC2626),
-                    page: const MissedDosesScreen(),
-                  ),
-                  _utilityButton(
-                    context,
-                    title: 'Add Medicine',
-                    icon: Icons.add_circle_outline,
-                    color: const Color(0xFF2563EB),
-                    page: AddMedicineScreen(patientId: user.id),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 8),
 
               // 3. Today's Schedule Checklist
               const Text(

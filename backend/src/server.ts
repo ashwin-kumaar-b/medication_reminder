@@ -235,6 +235,22 @@ app.post('/api/notifications/upsert', async (req, res) => {
   }
 });
 
+app.delete('/api/notifications/by-medication/:medicationId', async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase is not configured' });
+  const { medicationId } = req.params;
+  try {
+    const { error } = await supabase
+      .from('notifications')
+      .delete()
+      .or(`medication_id.eq.${medicationId},dedupe_key.like.%${medicationId}%`);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // USDA Food Search Proxy
 app.get('/api/medication-apis/usda/search', async (req, res) => {
   const query = req.query.query;
