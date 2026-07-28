@@ -380,6 +380,93 @@ class AuthProvider extends ChangeNotifier {
     final code = rng.nextInt(900000) + 100000;
     return 'MGC-$code';
   }
+
+  // Unlink patient from caretaker
+  Future<Map<String, dynamic>> unlinkPatient(String patientId) async {
+    try {
+      await ApiService.deleteCaretakerPatient(patientId);
+      await loadUsers();
+      return {'ok': true};
+    } catch (e) {
+      return {'ok': false, 'error': 'Failed to unlink patient: $e'};
+    }
+  }
+
+  // Update patient health profile
+  Future<Map<String, dynamic>> updatePatientHealthProfile({
+    required String userId,
+    required String gender,
+    required String bloodGroup,
+    required String dateOfBirth,
+    required int heightCm,
+    required double weightKg,
+    required List<String> chronicDiseases,
+    required List<Map<String, String>> allergies,
+    required String emergencyContactEmail,
+  }) async {
+    try {
+      final current = _users.firstWhere((u) => u.id == userId);
+      
+      final updatedUser = User(
+        id: current.id,
+        patientId: current.patientId,
+        caretakerId: current.caretakerId,
+        name: current.name,
+        email: current.email,
+        phoneNumber: current.phoneNumber,
+        password: current.password,
+        role: current.role,
+        relation: current.relation,
+        relationOther: current.relationOther,
+        gender: gender,
+        bloodGroup: bloodGroup,
+        dateOfBirth: dateOfBirth,
+        heightCm: heightCm,
+        weightKg: weightKg,
+        chronicDiseases: chronicDiseases,
+        infectionHistory: current.infectionHistory,
+        allergies: allergies,
+        emergencyContactEmail: emergencyContactEmail,
+        uiMode: current.uiMode,
+        linkedPatientId: current.linkedPatientId,
+      );
+
+      final userPayload = {
+        'id': updatedUser.id,
+        'name': updatedUser.name,
+        'email': updatedUser.email,
+        'phone': updatedUser.phoneNumber,
+        'password': updatedUser.password,
+        'role': updatedUser.role,
+        'ui_mode': updatedUser.uiMode,
+        'patient_id': updatedUser.patientId,
+        'caretaker_id': updatedUser.caretakerId,
+      };
+
+      final healthPayload = {
+        'user_id': updatedUser.id,
+        'gender': gender,
+        'blood_group': bloodGroup,
+        'date_of_birth': dateOfBirth,
+        'height_cm': heightCm,
+        'weight_kg': weightKg,
+        'chronic_diseases': chronicDiseases,
+        'infection_history': updatedUser.infectionHistory,
+        'allergies': allergies,
+        'emergency_contact_email': emergencyContactEmail,
+      };
+
+      await ApiService.upsertUser(userPayload: userPayload, healthPayload: healthPayload);
+      await loadUsers();
+      
+      if (_currentUser?.id == userId) {
+        await _persistUserSession(updatedUser);
+      }
+      return {'ok': true};
+    } catch (e) {
+      return {'ok': false, 'error': 'Failed to update health profile: $e'};
+    }
+  }
 }
 
 class HtmlCrypto {

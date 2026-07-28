@@ -151,6 +151,7 @@ class MedicineProvider extends ChangeNotifier {
     required String criticality,
     required String scheduleTime,
     required String frequency,
+    required String targetCondition,
   }) async {
     final String medId = const HtmlCrypto().randomUuid();
     final String createdAt = DateTime.now().toIso8601String();
@@ -179,6 +180,7 @@ class MedicineProvider extends ChangeNotifier {
       scheduleTime: scheduleTime,
       frequency: frequency,
       createdAt: createdAt,
+      targetCondition: targetCondition,
     );
 
     _medications.add(newMed);
@@ -239,6 +241,7 @@ class MedicineProvider extends ChangeNotifier {
             scheduleTime: updatedMed.scheduleTime,
             frequency: updatedMed.frequency,
             createdAt: updatedMed.createdAt,
+            targetCondition: updatedMed.targetCondition,
           );
         } catch (e) {
           debugPrint('Failed to resolve generic name on update: $e');

@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/medicine_provider.dart';
+import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
-
 import '../models/medication.dart';
+import 'health_profile_screen.dart';
 
 class AddMedicineScreen extends StatefulWidget {
   final String patientId;
@@ -24,6 +25,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
   String _selectedCategory = 'other';
   String _selectedCriticality = 'low';
   String _selectedFrequency = 'daily';
+  String? _selectedCondition;
   
   TimeOfDay _selectedTime = const TimeOfDay(hour: 8, minute: 0);
   bool _submitting = false;
@@ -39,6 +41,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
       _selectedCategory = med.category;
       _selectedCriticality = med.criticality;
       _selectedFrequency = med.frequency;
+      _selectedCondition = med.targetCondition;
 
       try {
         final parts = med.scheduleTime.split(':');
@@ -100,6 +103,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
           whoEssential: widget.medication!.whoEssential,
           whoRiskTier: widget.medication!.whoRiskTier,
           photoUrl: widget.medication!.photoUrl,
+          targetCondition: _selectedCondition,
         );
         await provider.updateMedication(updated);
       } else {
@@ -112,6 +116,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
           criticality: _selectedCriticality,
           scheduleTime: formattedTime,
           frequency: _selectedFrequency,
+          targetCondition: _selectedCondition ?? '',
         );
       }
       if (mounted) {
@@ -131,6 +136,27 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.medication != null;
+    final auth = Provider.of<AuthProvider>(context);
+
+    // Resolve matching patient
+    User? patientUser;
+    try {
+      patientUser = auth.users.firstWhere((u) => u.id == widget.patientId);
+    } catch (_) {}
+
+    final List<String> conditionOptions = [];
+    if (patientUser != null) {
+      if (patientUser.illness != null && patientUser.illness!.trim().isNotEmpty) {
+        conditionOptions.add(patientUser.illness!.trim());
+      }
+      for (final c in patientUser.chronicDiseases) {
+        if (c.trim().isNotEmpty && c.toLowerCase() != 'none') {
+          conditionOptions.add(c.trim());
+        }
+      }
+    }
+    final distinctOptions = conditionOptions.toSet().toList();
+
     return Scaffold(
       appBar: AppBar(
         title: Text(isEditing ? 'Edit Medication' : 'Add Medication'),
@@ -207,6 +233,69 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
               ),
               const SizedBox(height: 16),
 
+              // Treated Condition Selector or Warning
+              if (distinctOptions.isEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    border: Border.all(color: Colors.red[300]!),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.warning_amber_rounded, color: Colors.red),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Health Profile Incomplete',
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'You must add chronic conditions or illnesses to your Health Profile first before registering medications.',
+                        style: TextStyle(fontSize: 13, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const HealthProfileScreen()),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red[700],
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.edit, size: 16),
+                        label: const Text('Update Health Profile'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ] else ...[
+                DropdownButtonFormField<String>(
+                  value: distinctOptions.contains(_selectedCondition) ? _selectedCondition : null,
+                  decoration: const InputDecoration(
+                    labelText: 'Purpose / Treated Condition',
+                    border: OutlineInputBorder(),
+                    helperText: 'Select the condition this medicine treats (from your Health Profile)',
+                  ),
+                  items: distinctOptions.map((cond) => DropdownMenuItem(value: cond, child: Text(cond))).toList(),
+                  onChanged: (v) => setState(() => _selectedCondition = v),
+                  validator: (v) => v == null || v.isEmpty ? 'Please select a condition' : null,
+                ),
+                const SizedBox(height: 16),
+              ],
+
               // Time Picker
               ListTile(
                 title: const Text('Schedule Time', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -262,7 +351,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
               const SizedBox(height: 24),
 
               ElevatedButton(
-                onPressed: _submitting ? null : _submit,
+                onPressed: (_submitting || distinctOptions.isEmpty) ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1E3A8A),
                   foregroundColor: Colors.white,

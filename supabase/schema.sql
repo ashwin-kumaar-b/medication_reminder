@@ -41,6 +41,7 @@ alter table medications add column if not exists food_timing text not null defau
 alter table medications add column if not exists display_name text;
 alter table medications add column if not exists generic_name text;
 alter table medications add column if not exists who_essential boolean;
+alter table medications add column if not exists target_condition text;
 alter table medications add column if not exists who_risk_tier text;
 
 create table if not exists logs (

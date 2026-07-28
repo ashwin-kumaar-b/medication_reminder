@@ -14,6 +14,7 @@ class Medication {
   final String scheduleTime; // '08:00'
   final String frequency; // 'daily' | 'twice' | 'weekly'
   final String createdAt;
+  final String? targetCondition;
 
   Medication({
     required this.id,
@@ -31,6 +32,7 @@ class Medication {
     required this.scheduleTime,
     required this.frequency,
     required this.createdAt,
+    this.targetCondition,
   });
 
   factory Medication.fromJson(Map<String, dynamic> json) {
@@ -50,6 +52,7 @@ class Medication {
       scheduleTime: json['schedule_time'] ?? json['scheduleTime'] ?? '',
       frequency: json['frequency'] ?? 'daily',
       createdAt: json['created_at'] ?? json['createdAt'] ?? '',
+      targetCondition: json['target_condition'] ?? json['targetCondition'],
     );
   }
 
@@ -70,6 +73,7 @@ class Medication {
       'schedule_time': scheduleTime,
       'frequency': frequency,
       'created_at': createdAt,
+      'target_condition': targetCondition,
     };
   }
 }

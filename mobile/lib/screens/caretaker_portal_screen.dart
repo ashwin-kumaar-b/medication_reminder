@@ -4,6 +4,7 @@ import '../providers/auth_provider.dart';
 import '../providers/medicine_provider.dart';
 import '../models/user.dart';
 import 'add_medicine_screen.dart';
+import 'create_patient_screen.dart';
 
 class CaretakerPortalScreen extends StatefulWidget {
   const CaretakerPortalScreen({super.key});
@@ -14,26 +15,14 @@ class CaretakerPortalScreen extends StatefulWidget {
 
 class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
   final _linkController = TextEditingController();
-  final _pNameController = TextEditingController();
-  final _pEmailController = TextEditingController();
-  final _pPassController = TextEditingController();
-  final _pAgeController = TextEditingController();
-  final _pIllnessController = TextEditingController();
 
   bool _loading = false;
   String? _linkErrorMessage;
   String? _linkSuccessMessage;
-  String? _createErrorMessage;
-  String? _createSuccessMessage;
 
   @override
   void dispose() {
     _linkController.dispose();
-    _pNameController.dispose();
-    _pEmailController.dispose();
-    _pPassController.dispose();
-    _pAgeController.dispose();
-    _pIllnessController.dispose();
     super.dispose();
   }
 
@@ -65,38 +54,58 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
     });
   }
 
-  Future<void> _createPatient(String caretakerId) async {
-    setState(() {
-      _loading = true;
-      _createErrorMessage = null;
-      _createSuccessMessage = null;
-    });
-
-    final auth = Provider.of<AuthProvider>(context, listen: false);
-    final res = await auth.createPatientForCaretaker(
-      caretakerId,
-      _pNameController.text,
-      _pEmailController.text,
-      _pPassController.text,
-      int.tryParse(_pAgeController.text) ?? 50,
-      _pIllnessController.text,
+  void _confirmUnlinkPatient(BuildContext context, AuthProvider auth, User patient) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove Patient Link'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Are you sure you want to remove the link with ${patient.name}?', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            const Text(
+              'This will stop you from monitoring their medications and logs. '
+              'To connect again, you will need to send a new link request.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              setState(() {
+                _loading = true;
+              });
+              final res = await auth.unlinkPatient(patient.id);
+              setState(() {
+                _loading = false;
+              });
+              if (mounted) {
+                if (res['ok']) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Successfully unlinked ${patient.name}')),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(res['error'] ?? 'Failed to unlink patient.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Yes, Unlink', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
-
-    setState(() {
-      _loading = false;
-      if (res['ok']) {
-        _createSuccessMessage = 'Patient profile created successfully!';
-        _pNameController.clear();
-        _pEmailController.clear();
-        _pPassController.clear();
-        _pAgeController.clear();
-        _pIllnessController.clear();
-        _createErrorMessage = null;
-      } else {
-        _createErrorMessage = res['error'];
-        _createSuccessMessage = null;
-      }
-    });
   }
 
   @override
@@ -112,6 +121,18 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
         backgroundColor: const Color(0xFF1E3A8A),
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person_add),
+            tooltip: 'Create Patient Profile',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CreatePatientScreen(caretakerId: caretaker.id),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () {
@@ -220,17 +241,27 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     const Text('Medications:', style: TextStyle(fontWeight: FontWeight.bold)),
-                                    ElevatedButton.icon(
-                                      onPressed: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => AddMedicineScreen(patientId: patient.id),
-                                          ),
-                                        );
-                                      },
-                                      icon: const Icon(Icons.add, size: 16),
-                                      label: const Text('Add Med', style: TextStyle(fontSize: 12)),
+                                    Row(
+                                      children: [
+                                        TextButton.icon(
+                                          onPressed: () => _confirmUnlinkPatient(context, auth, patient),
+                                          icon: const Icon(Icons.link_off, size: 16, color: Colors.red),
+                                          label: const Text('Unlink', style: TextStyle(fontSize: 12, color: Colors.red)),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        ElevatedButton.icon(
+                                          onPressed: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => AddMedicineScreen(patientId: patient.id),
+                                              ),
+                                            );
+                                          },
+                                          icon: const Icon(Icons.add, size: 16),
+                                          label: const Text('Add Med', style: TextStyle(fontSize: 12)),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
@@ -299,57 +330,7 @@ class _CaretakerPortalScreenState extends State<CaretakerPortalScreen> {
                 Text(_linkSuccessMessage!, style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
               ],
 
-              const SizedBox(height: 24),
-              const Text(
-                'Create New Patient Profile',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      TextField(
-                        controller: _pNameController,
-                        decoration: const InputDecoration(labelText: 'Patient Name'),
-                      ),
-                      TextField(
-                        controller: _pEmailController,
-                        decoration: const InputDecoration(labelText: 'Login Email'),
-                      ),
-                      TextField(
-                        controller: _pPassController,
-                        obscureText: true,
-                        decoration: const InputDecoration(labelText: 'Login Password'),
-                      ),
-                      TextField(
-                        controller: _pAgeController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Patient Age'),
-                      ),
-                      TextField(
-                        controller: _pIllnessController,
-                        decoration: const InputDecoration(labelText: 'Primary Chronic Disease / Condition'),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _loading ? null : () => _createPatient(caretaker.id),
-                        child: const Text('Create Profile'),
-                      ),
-                      if (_createErrorMessage != null) ...[
-                        const SizedBox(height: 8),
-                        Text(_createErrorMessage!, style: const TextStyle(color: Colors.red)),
-                      ],
-                      if (_createSuccessMessage != null) ...[
-                        const SizedBox(height: 8),
-                        Text(_createSuccessMessage!, style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
+              const SizedBox(height: 16),
             ],
           ),
         ),
