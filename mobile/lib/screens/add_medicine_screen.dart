@@ -234,65 +234,31 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Treated Condition Selector or Warning
+              // Treated Condition Selector (Optional)
               if (distinctOptions.isEmpty) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red[50],
-                    border: Border.all(color: Colors.red[300]!),
-                    borderRadius: BorderRadius.circular(8),
+                TextFormField(
+                  initialValue: _selectedCondition,
+                  decoration: const InputDecoration(
+                    labelText: 'Purpose / Treated Condition (Optional)',
+                    border: OutlineInputBorder(),
+                    helperText: 'Enter the illness/condition this medicine treats',
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.warning_amber_rounded, color: Colors.red),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Health Profile Incomplete',
-                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'You must add chronic conditions or illnesses to your Health Profile first before registering medications.',
-                        style: TextStyle(fontSize: 13, color: Colors.black87),
-                      ),
-                      const SizedBox(height: 12),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const HealthProfileScreen()),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red[700],
-                          foregroundColor: Colors.white,
-                        ),
-                        icon: const Icon(Icons.edit, size: 16),
-                        label: const Text('Update Health Profile'),
-                      ),
-                    ],
-                  ),
+                  onChanged: (v) => setState(() => _selectedCondition = v),
                 ),
                 const SizedBox(height: 16),
               ] else ...[
                 DropdownButtonFormField<String>(
-                  value: distinctOptions.contains(_selectedCondition) ? _selectedCondition : null,
+                  value: (distinctOptions.contains(_selectedCondition) || _selectedCondition == '') ? _selectedCondition : null,
                   decoration: const InputDecoration(
-                    labelText: 'Purpose / Treated Condition',
+                    labelText: 'Purpose / Treated Condition (Optional)',
                     border: OutlineInputBorder(),
-                    helperText: 'Select the condition this medicine treats (from your Health Profile)',
+                    helperText: 'Select the condition this medicine treats',
                   ),
-                  items: distinctOptions.map((cond) => DropdownMenuItem(value: cond, child: Text(cond))).toList(),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('None / General')),
+                    ...distinctOptions.map((cond) => DropdownMenuItem(value: cond, child: Text(cond))),
+                  ],
                   onChanged: (v) => setState(() => _selectedCondition = v),
-                  validator: (v) => v == null || v.isEmpty ? 'Please select a condition' : null,
                 ),
                 const SizedBox(height: 16),
               ],
@@ -352,7 +318,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
               const SizedBox(height: 24),
 
               ElevatedButton(
-                onPressed: (_submitting || distinctOptions.isEmpty) ? null : _submit,
+                onPressed: _submitting ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1E3A8A),
                   foregroundColor: Colors.white,
