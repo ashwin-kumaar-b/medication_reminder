@@ -21,7 +21,8 @@ class ApiService {
     if (response.statusCode == 200) {
       return json.decode(response.body);
     }
-    throw Exception('Failed to load users');
+    print('Failed to load users: status code=${response.statusCode}, body=${response.body}');
+    throw Exception('Failed to load users (status=${response.statusCode})');
   }
 
   static Future<Map<String, dynamic>> upsertUser({
