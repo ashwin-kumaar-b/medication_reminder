@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 class ApiService {
   // Use 10.0.2.2 to point to host's localhost on Android Emulator.
   // When deploying to device, replace this with your machine's local IP (e.g., 192.168.x.x) or domain.
-  static const String baseUrl = 'http://10.139.213.2:5000';
+  static const String baseUrl = 'http://10.0.2.2:5000';
 
   // Base status check
   static Future<Map<String, dynamic>> getStatus() async {
