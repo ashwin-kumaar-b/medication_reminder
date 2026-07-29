@@ -4,6 +4,7 @@ import '../providers/medicine_provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../models/medication.dart';
+import '../models/user.dart';
 import 'health_profile_screen.dart';
 
 class AddMedicineScreen extends StatefulWidget {
