@@ -355,12 +355,21 @@ class AuthProvider extends ChangeNotifier {
 
   // Helper utils
   String _normalizePhoneNumber(String phone) {
-    String cleaned = phone.replaceAll(RegExp(r'\s+'), '');
+    String cleaned = phone.replaceAll(RegExp(r'[\s\-\(\)]+'), '');
+    if (cleaned.startsWith('+91')) {
+      return cleaned;
+    }
+    if (cleaned.startsWith('91') && cleaned.length == 12) {
+      return '+$cleaned';
+    }
     if (cleaned.startsWith('0')) {
-      cleaned = '+91${cleaned.substring(1)}'; // Default to +91 country code fallback
+      return '+91${cleaned.substring(1)}';
+    }
+    if (cleaned.length == 10) {
+      return '+91$cleaned';
     }
     if (!cleaned.startsWith('+')) {
-      cleaned = '+$cleaned';
+      return '+$cleaned';
     }
     return cleaned;
   }

@@ -142,7 +142,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   decoration: const InputDecoration(
                     labelText: 'Mobile Number',
                     prefixIcon: Icon(Icons.phone_outlined),
-                    helperText: 'Includes country code, e.g. +91 9999999999',
+                    helperText: 'Enter 10-digit mobile number (e.g. 9876543210)',
                     border: OutlineInputBorder(),
                   ),
                   validator: (v) => v == null || v.trim().isEmpty ? 'Enter mobile number' : null,

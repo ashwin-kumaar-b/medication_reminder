@@ -29,6 +29,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
   String? _selectedCondition;
   
   TimeOfDay _selectedTime = const TimeOfDay(hour: 8, minute: 0);
+  TimeOfDay _selectedTime2 = const TimeOfDay(hour: 20, minute: 0);
   bool _submitting = false;
 
   @override
@@ -45,11 +46,18 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
       _selectedCondition = med.targetCondition;
 
       try {
-        final parts = med.scheduleTime.split(':');
-        if (parts.length == 2) {
-          final hour = int.parse(parts[0]);
-          final minute = int.parse(parts[1]);
-          _selectedTime = TimeOfDay(hour: hour, minute: minute);
+        final times = med.scheduleTime.split(',');
+        if (times.isNotEmpty) {
+          final parts1 = times[0].trim().split(':');
+          if (parts1.length == 2) {
+            _selectedTime = TimeOfDay(hour: int.parse(parts1[0]), minute: int.parse(parts1[1]));
+          }
+        }
+        if (times.length > 1) {
+          final parts2 = times[1].trim().split(':');
+          if (parts2.length == 2) {
+            _selectedTime2 = TimeOfDay(hour: int.parse(parts2[0]), minute: int.parse(parts2[1]));
+          }
         }
       } catch (e) {
         debugPrint('Failed to parse schedule time: $e');
@@ -75,6 +83,16 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
     }
   }
 
+  Future<void> _pickTime2() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime2,
+    );
+    if (picked != null) {
+      setState(() => _selectedTime2 = picked);
+    }
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _submitting = true);
@@ -82,17 +100,23 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
     final provider = Provider.of<MedicineProvider>(context, listen: false);
 
     // Format timeOfDay to HH:mm
-    final hour = _selectedTime.hour.toString().padLeft(2, '0');
-    final minute = _selectedTime.minute.toString().padLeft(2, '0');
-    final formattedTime = '$hour:$formattedMinute';
+    final hour1 = _selectedTime.hour.toString().padLeft(2, '0');
+    final minute1 = _selectedTime.minute.toString().padLeft(2, '0');
+    String formattedTime = '$hour1:$minute1';
+
+    if (_selectedFrequency == 'twice') {
+      final hour2 = _selectedTime2.hour.toString().padLeft(2, '0');
+      final minute2 = _selectedTime2.minute.toString().padLeft(2, '0');
+      formattedTime = '$hour1:$minute1, $hour2:$minute2';
+    }
 
     try {
       if (widget.medication != null) {
         final updated = Medication(
           id: widget.medication!.id,
           patientId: widget.medication!.patientId,
-          drugName: _drugNameController.text,
-          dosage: _dosageController.text,
+          drugName: _drugNameController.text.trim(),
+          dosage: _dosageController.text.trim(),
           foodTiming: _selectedFoodTiming,
           category: _selectedCategory,
           criticality: _selectedCriticality,
@@ -110,8 +134,8 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
       } else {
         await provider.addMedication(
           patientId: widget.patientId,
-          drugName: _drugNameController.text,
-          dosage: _dosageController.text,
+          drugName: _drugNameController.text.trim(),
+          dosage: _dosageController.text.trim(),
           foodTiming: _selectedFoodTiming,
           category: _selectedCategory,
           criticality: _selectedCriticality,
@@ -227,10 +251,11 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
               TextFormField(
                 controller: _dosageController,
                 decoration: const InputDecoration(
-                  labelText: 'Dosage (e.g. 500mg or 1 tablet)',
+                  labelText: 'Dosage & Unit (e.g. 500mg, 1 tablet, 10ml)',
+                  helperText: 'Enter both amount and unit (e.g. 400mg or 2 tablets)',
                   border: OutlineInputBorder(),
                 ),
-                validator: (v) => v == null || v.trim().isEmpty ? 'Please enter dosage info' : null,
+                validator: (v) => v == null || v.trim().isEmpty ? 'Please enter dosage info with unit' : null,
               ),
               const SizedBox(height: 16),
 
@@ -263,17 +288,41 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
                 const SizedBox(height: 16),
               ],
 
-              // Time Picker
-              ListTile(
-                title: const Text('Schedule Time', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('${_selectedTime.hour.toString().padLeft(2, '0')}:$formattedMinute'),
-                trailing: const Icon(Icons.access_time),
-                shape: RoundedRectangleBorder(
-                  side: BorderSide(color: Colors.grey[400]!),
-                  borderRadius: BorderRadius.circular(4),
+              // Time Picker(s)
+              if (_selectedFrequency == 'twice') ...[
+                ListTile(
+                  title: const Text('Schedule Time 1 (First Dose)', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}'),
+                  trailing: const Icon(Icons.access_time),
+                  shape: RoundedRectangleBorder(
+                    side: BorderSide(color: Colors.grey[400]!),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  onTap: _pickTime,
                 ),
-                onTap: _pickTime,
-              ),
+                const SizedBox(height: 12),
+                ListTile(
+                  title: const Text('Schedule Time 2 (Second Dose)', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('${_selectedTime2.hour.toString().padLeft(2, '0')}:${_selectedTime2.minute.toString().padLeft(2, '0')}'),
+                  trailing: const Icon(Icons.access_time),
+                  shape: RoundedRectangleBorder(
+                    side: BorderSide(color: Colors.grey[400]!),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  onTap: _pickTime2,
+                ),
+              ] else ...[
+                ListTile(
+                  title: const Text('Schedule Time', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}'),
+                  trailing: const Icon(Icons.access_time),
+                  shape: RoundedRectangleBorder(
+                    side: BorderSide(color: Colors.grey[400]!),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  onTap: _pickTime,
+                ),
+              ],
               const SizedBox(height: 16),
 
               DropdownButtonFormField<String>(
