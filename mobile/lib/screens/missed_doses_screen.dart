@@ -109,7 +109,7 @@ class _MissedDosesScreenState extends State<MissedDosesScreen> {
 
     try {
       final res = await ApiService.getGroqCompletion({
-        'model': 'llama-3.1-8b-instant',
+        'model': 'llama-3.3-70b-versatile',
         'temperature': 0.15,
         'max_tokens': 450,
         'response_format': {'type': 'json_object'},
