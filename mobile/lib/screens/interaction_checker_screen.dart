@@ -65,7 +65,7 @@ class _InteractionCheckerScreenState extends State<InteractionCheckerScreen> {
 
       // Dispatch request to backend Groq completion proxy
       final res = await ApiService.getGroqCompletion({
-        'model': 'llama-3.1-8b-instant',
+        'model': 'llama-3.3-70b-versatile',
         'temperature': 0.2,
         'max_tokens': 400,
         'response_format': {'type': 'json_object'},

@@ -5,12 +5,9 @@ import path from 'path';
 dotenv.config();
 
 const groqKey = process.env.GROQ_API_KEY;
-if (!groqKey) {
-  console.error("GROQ_API_KEY is not defined in .env");
-  process.exit(1);
-}
+const geminiKey = process.env.GEMINI_API_KEY;
 
-async function callGroq(prompt: string): Promise<any> {
+async function callGroqModel(model: string, prompt: string): Promise<any> {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -18,19 +15,19 @@ async function callGroq(prompt: string): Promise<any> {
       Authorization: `Bearer ${groqKey}`,
     },
     body: JSON.stringify({
-      'model': 'llama-3.1-8b-instant',
-      'temperature': 0.2,
-      'max_tokens': 500,
-      'response_format': { 'type': 'json_object' },
-      'messages': [
-        { 'role': 'system', 'content': 'You are a careful clinical medication safety assistant. Return strict JSON only.' },
-        { 'role': 'user', 'content': prompt }
+      model: model,
+      temperature: 0.2,
+      max_tokens: 600,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: 'You are a careful clinical medication safety assistant. Return strict JSON only.' },
+        { role: 'user', content: prompt }
       ]
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`Groq request failed: ${response.statusText}`);
+    throw new Error(`Groq ${model} request failed: ${response.statusText} - ${await response.text()}`);
   }
 
   const data = await response.json() as any;
@@ -38,110 +35,95 @@ async function callGroq(prompt: string): Promise<any> {
   return JSON.parse(content.replace(/```json|```/g, '').trim());
 }
 
-async function runTests() {
-  console.log("Starting automated safety tests for Patient 1 (Amit Sharma)...");
+async function callGeminiModel(model: string, prompt: string): Promise<any> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey!)}`;
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: prompt }]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 600,
+        responseMimeType: 'application/json'
+      }
+    })
+  });
 
-  // 1. Drug Interaction (Amlodipine + Ibuprofen) with CKD and Hypertension
-  console.log("Running Test 1: Drug-Drug & Disease Interaction Checker...");
-  const prompt1 = [
+  if (!response.ok) {
+    throw new Error(`Gemini ${model} failed: ${response.statusText} - ${await response.text()}`);
+  }
+
+  const data = await response.json() as any;
+  const rawText = data.candidates[0].content.parts[0].text;
+  return JSON.parse(rawText.replace(/```json|```/g, '').trim());
+}
+
+async function runBenchmark() {
+  console.log("==================================================================");
+  console.log("BENCHMARKING HEALTH & PHARMACOLOGY AI MODELS FOR CLINICAL DEPTH");
+  console.log("==================================================================\n");
+
+  const promptInteraction = [
     'You are a clinical safety assistant for a medication reminder app.',
-    'Provide a drug-to-drug interaction analysis between two medications, cross-referenced with the patient\'s health conditions.',
+    'Provide a thorough drug-to-drug and drug-disease interaction analysis between two medications, cross-referenced with the patient\'s health conditions.',
     'The user is taking: "Amlodipine" (for Hypertension) and "Ibuprofen" (for Pain Relief).',
     'Patient\'s chronic conditions: "Hypertension", "Chronic Kidney Disease (CKD)".',
     'Patient\'s allergies: "Sulfa Drugs".',
-    'Evaluate the safety of this combination, especially in relation to the chronic kidney disease (NSAID renal risk).',
+    'Evaluate the clinical safety of this combination with detailed pharmacological explanations of renal hemodynamics (NSAID inhibition of prostaglandins vs CCB effects in CKD).',
     'Return only JSON with this exact shape:',
     '{"severity":"high|moderate|low|safe|none","directive":"AVOID COMBINATION or CHOOSE ALTERNATIVE or MONITOR CLOSELY or SAFE","genericA":"Amlodipine","genericB":"Ibuprofen","summary":"...","explanation":"...","recommendations":["..."],"cautions":["..."]}'
   ].join('\n');
 
-  let drugInteractionResult;
+  // Model 1: Groq Llama-3.3-70b-versatile
+  console.log("Evaluating Model 1: Groq Llama-3.3-70b-versatile (70 Billion Parameters)...");
+  let llama70bResult;
   try {
-    drugInteractionResult = await callGroq(prompt1);
-    console.log("Test 1 completed successfully.");
+    llama70bResult = await callGroqModel('llama-3.3-70b-versatile', promptInteraction);
+    console.log("-> Llama-3.3-70b Evaluation Complete.");
   } catch (e) {
-    console.error("Test 1 failed:", e);
-    drugInteractionResult = { error: String(e) };
+    console.error("Llama-3.3-70b failed:", e);
+    llama70bResult = { error: String(e) };
   }
 
-  // 2. Food Compatibility (Amlodipine + Grapefruit Juice)
-  console.log("Running Test 2: Food Compatibility Checker...");
-  const prompt2 = [
-    'You are a clinical safety assistant for a medication reminder app.',
-    'Analyze the food-drug compatibility between the food "Grapefruit Juice" and the medication "Amlodipine".',
-    'Determine if they can be taken together and state if there are any timing restrictions.',
-    'Return only JSON with this exact shape:',
-    '{"severity":"high|moderate|safe","directive":"AVOID COMBINATION or LIMIT INTAKE or SAFE TO TAKE","genericDrug":"Amlodipine","summary":"...","explanation":"..."}'
-  ].join('\n');
-
-  let foodResult;
+  // Model 2: Google Gemini-2.0-flash
+  console.log("\nEvaluating Model 2: Google Gemini-2.0-flash...");
+  let geminiResult;
   try {
-    foodResult = await callGroq(prompt2);
-    console.log("Test 2 completed successfully.");
+    geminiResult = await callGeminiModel('gemini-2.0-flash', promptInteraction);
+    console.log("-> Gemini-2.0-flash Evaluation Complete.");
   } catch (e) {
-    console.error("Test 2 failed:", e);
-    foodResult = { error: String(e) };
+    console.error("Gemini-2.0-flash failed:", e);
+    geminiResult = { error: String(e) };
   }
 
-  // 3. Missed Dose Advice (Amlodipine, 8.0 hours late)
-  console.log("Running Test 3: Missed Dose Recovery Advice...");
-  const prompt3 = [
-    'You are an expert clinical safety assistant for a medication reminder application.',
-    'A patient missed their dose of Amlodipine.',
-    'Medication details:',
-    '- Name: Amlodipine',
-    '- Dosage: 5mg',
-    '- Frequency: DAILY',
-    '- Criticality: HIGH',
-    '- Food timing: after-food',
-    '- Scheduled time: 08:00',
-    '- Hours late: 8.0 hours (elapsed since scheduled time)',
-    'Patient health profile:',
-    '- Chronic conditions: Hypertension, Chronic Kidney Disease',
-    '- Allergies: Sulfa Drugs',
-    'Evaluate clinical safety to classify the recovery status as take_now, skip, or contact_doctor.',
-    'Return only JSON with this exact shape:',
-    '{',
-    '  "status": "take_now" | "skip" | "contact_doctor",',
-    '  "action": "Take Missed Dose Now" | "Skip Missed Dose & Wait" | "Contact Doctor / Pharmacist",',
-    '  "rationale": "A clear, clinical explanation. It must analyze the drug, the hours late (8.0 hrs), and the patient\'s conditions/allergies. Detail the risk of missing vs double dosing.",',
-    '  "doctor_warning": "Warning about when to consult a doctor." ',
-    '}'
-  ].join('\n');
-
-  let missedDoseResult;
-  try {
-    missedDoseResult = await callGroq(prompt3);
-    console.log("Test 3 completed successfully.");
-  } catch (e) {
-    console.error("Test 3 failed:", e);
-    missedDoseResult = { error: String(e) };
-  }
-
-  // Output results to a Markdown artifact file
-  const artifactContent = [
-    `# Safety Agent Automated Audit Results - Patient 1`,
+  // Write comparison report
+  const report = [
+    `# Clinical AI Model Comparison Report: Healthcare & Medication Safety`,
     ``,
-    `Audit conducted for **Patient 1: Amit Sharma** (Hypertension, Chronic Kidney Disease, Sulfa Allergy).`,
+    `Evaluating models specifically for **Clinical Explanations**, **Pharmacological Reasoning**, and **Disease-Drug Safety Accuracy**.`,
     ``,
-    `## 🧬 Test 1: Drug-Drug & Disease Interaction (Amlodipine + Ibuprofen)`,
+    `## 1. Groq Llama-3.3-70b-versatile (70 Billion Parameters)`,
     `\`\`\`json`,
-    JSON.stringify(drugInteractionResult, null, 2),
+    JSON.stringify(llama70bResult, null, 2),
     `\`\`\``,
     ``,
-    `## 🍎 Test 2: Food Compatibility (Amlodipine + Grapefruit Juice)`,
+    `## 2. Google Gemini-2.0-flash (Google DeepMind)`,
     `\`\`\`json`,
-    JSON.stringify(foodResult, null, 2),
-    `\`\`\``,
-    ``,
-    `## ⏰ Test 3: Missed Dose Recovery Advice (Amlodipine - 8 Hours Late)`,
-    `\`\`\`json`,
-    JSON.stringify(missedDoseResult, null, 2),
+    JSON.stringify(geminiResult, null, 2),
     `\`\`\``
   ].join('\n');
 
-  const artifactPath = path.join('C:', 'Users', 'deves', '.gemini', 'antigravity-ide', 'brain', 'c15d196a-165d-4687-9009-47a2fe9366d1', 'safety_test_results.md');
-  fs.writeFileSync(artifactPath, artifactContent);
-  console.log(`Successfully generated audit artifact at: ${artifactPath}`);
+  const artifactPath = path.join('C:', 'Users', 'deves', '.gemini', 'antigravity-ide', 'brain', 'c15d196a-165d-4687-9009-47a2fe9366d1', 'model_comparison_report.md');
+  fs.writeFileSync(artifactPath, report);
+  console.log(`\nComparison Report generated at: ${artifactPath}`);
 }
 
-runTests();
+runBenchmark();
+

@@ -73,7 +73,7 @@ class _FoodCheckerScreenState extends State<FoodCheckerScreen> {
       ].join('\n');
 
       final aiRes = await ApiService.getGroqCompletion({
-        'model': 'llama-3.1-8b-instant',
+        'model': 'llama-3.3-70b-versatile',
         'temperature': 0.2,
         'max_tokens': 300,
         'response_format': {'type': 'json_object'},
