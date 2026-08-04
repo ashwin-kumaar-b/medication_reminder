@@ -22,6 +22,21 @@ const supabase = (supabaseUrl && supabaseAnonKey)
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.send(`
+    <div style="font-family: system-ui, sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto;">
+      <h1 style="color: #2563eb;">Medication Reminder API</h1>
+      <p>Backend server is running successfully.</p>
+      <ul>
+        <li><strong>Status:</strong> Online</li>
+        <li><strong>Supabase:</strong> ${supabase ? 'Connected' : 'Not configured'}</li>
+        <li><a href="/api/status">/api/status</a></li>
+      </ul>
+    </div>
+  `);
+});
+
 // Base route to check API status
 app.get('/api/status', (req, res) => {
   res.json({
